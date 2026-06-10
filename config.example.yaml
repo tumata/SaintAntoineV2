@@ -43,6 +43,7 @@ web_enabled: true
 web_host: 0.0.0.0                     # reachable over Tailscale
 web_port: 8080
 web_auth_token: ""                    # optional shared token; "" = no auth (Tailscale gates access)
+upload_max_bytes: 5000000             # max song upload size (~5 MB; raise for WAVs)
 
 # -------------------------------------------------------------- webhook ----
 webhook_url: ""                       # "" = disabled. POSTs {"track","timestamp"} on each play

@@ -36,6 +36,7 @@ class Harness:
 
     def __init__(self, tmp_path, n_tracks=3, track_duration=10.0, cfg=None, seed=42):
         self.clock = FakeClock()
+        self.music_folder = tmp_path
         self.tracks = []
         for i in range(n_tracks):
             p = tmp_path / f"song{i}.mp3"

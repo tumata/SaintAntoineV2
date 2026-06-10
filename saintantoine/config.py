@@ -66,6 +66,7 @@ class Config:
     web_host: str = "0.0.0.0"
     web_port: int = 8080
     web_auth_token: str = ""
+    upload_max_bytes: int = 5_000_000
 
     # Webhook (empty URL = disabled)
     webhook_url: str = ""

@@ -268,6 +268,45 @@ AudioBackend (interface)
   - `GET /` — the dashboard page.
 - Web server runs on its own thread inside the single process; its failures must never take down playback/relay logic (isolated, guarded).
 
+### 11.1 Song management page
+
+A second page for managing the music library from the browser. Navigation is a plain
+**Songs** link in the dashboard header (token query string carried across) and a
+**← Dashboard** link back.
+
+- **Layout:** page title with an **Upload song** button at the top right; below it a card
+  listing every playable file in the resolved music folder (name + file size), each row
+  with a **Delete** button behind a `confirm()` dialog.
+- **Restart to apply (cheap approach):** the track list is scanned once at startup (§7.1),
+  so uploads/deletes take effect **only after a restart**. After the first successful
+  change, the page shows a persistent *"changes take effect after restart"* notice with a
+  **Restart** button (same `/restart` mechanism as §6.2). No live rescan.
+- **Endpoints** (all behind the optional token gate of D11):
+  - `GET /songs` — the page.
+  - `GET /api/songs` — JSON list `{songs: [{name, size_bytes}], extensions, max_upload_bytes}`.
+  - `POST /api/songs` — multipart upload (field `file`).
+  - `DELETE /api/songs/<name>` — delete one file.
+- **Upload safeguards:**
+  1. Extension must be in `audio_extensions`; filename is run through
+     `secure_filename()` (note: this ASCII-fies accents and replaces spaces).
+  2. Size ≤ `upload_max_bytes` (config key, default 5 MB), enforced server-side via
+     Flask `MAX_CONTENT_LENGTH` (JSON 413) **and** checked client-side before sending.
+  3. Name collision with an existing file → **409, reject** ("delete it first") — never
+     overwrite, never auto-rename.
+  4. Atomic write: save to a `.part` temp name in the same folder, then rename — a
+     half-written file can never be picked up by a startup scan.
+- **Delete safeguards:**
+  1. Path-traversal defense: bare filenames only — reject separators, `..` and leading
+     dots, and verify the resolved path stays inside the music folder.
+  2. Only files matching `audio_extensions` can be deleted (never arbitrary files).
+  3. Deleting the currently-playing track is safe by design: the open file keeps playing
+     (POSIX), and the pre-play existence check (§7.3) handles it vanishing afterwards.
+  4. Deleting the last song is allowed; the page warns that the 0-track behavior of §7.1
+     applies after restart.
+- **Out of scope:** live rescan of the bag, audio-content validation (extension check
+  only — an invalid file fails at play time, which the watchdog already tolerates),
+  rename/reorder.
+
 ---
 
 ## 12. Configuration
@@ -278,7 +317,7 @@ AudioBackend (interface)
   - GPIO: `button_pin`, `button_pull_up`, `relay_pins`, `relay_active_high`, `relay_initial_value`
   - Debounce: `hold_window_ms`, `sample_interval_ms`, `min_press_interval_ms`, `rapidfire_count`, `rapidfire_window_s`, `rapidfire_cooldown_s`, `gpiozero_bounce_time_s`
   - Audio: `startup_delay_s`, watchdog thresholds (`health_probe_interval_s`, `play_start_grace_s`, `max_reinit_attempts`), `on_audio_fault` policy (`idle` | `resume`)
-  - Web: `web_enabled`, `web_host` (default `0.0.0.0`), `web_port`, `web_auth_token` (optional)
+  - Web: `web_enabled`, `web_host` (default `0.0.0.0`), `web_port`, `web_auth_token` (optional), `upload_max_bytes` (§11.1, default 5 MB)
   - Webhook: `webhook_url` (empty = disabled), `webhook_timeout_s`
   - Logging: `log_file`, `log_level`, `log_ring_buffer_size`
 

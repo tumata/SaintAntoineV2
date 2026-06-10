@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Saint Antoine — Songs</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 1.5rem; background: #14171c; color: #e6e8eb;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  header { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+  h1 { font-size: 1.4rem; margin: 0; }
+  a.nav { color: #93b4f5; text-decoration: none; font-size: .9rem; }
+  a.nav:hover { text-decoration: underline; }
+  .spacer { margin-left: auto; }
+  .card {
+    background: #1c2027; border: 1px solid #2a3038; border-radius: 12px;
+    padding: 1.1rem 1.25rem; margin-top: 1rem;
+  }
+  button {
+    font-size: 1rem; font-weight: 600; border: 0; border-radius: 10px;
+    padding: .7rem 1.4rem; cursor: pointer; color: #fff;
+  }
+  #upload-btn { background: #2563eb; }
+  #upload-btn:hover { background: #1d4ed8; }
+  #restart-btn { background: #7f1d1d; }
+  #restart-btn:hover { background: #991b1b; }
+  ul#songs { list-style: none; margin: 0; padding: 0; }
+  ul#songs li {
+    display: flex; align-items: center; gap: 1rem;
+    padding: .6rem .25rem; border-bottom: 1px solid #2a3038;
+  }
+  ul#songs li:last-child { border-bottom: 0; }
+  .song-name { overflow-wrap: anywhere; }
+  .song-size { color: #6b7480; font-size: .78rem; white-space: nowrap; margin-left: auto; }
+  .delete-btn { background: #4b5563; font-size: .8rem; padding: .35rem .8rem; }
+  .delete-btn:hover { background: #b91c1c; }
+  #empty { color: #9aa3ad; font-style: italic; }
+  #notice {
+    display: none; margin-top: 1rem; padding: .8rem 1rem; border-radius: 10px;
+    background: #78350f; font-weight: 600;
+    align-items: center; gap: 1rem; flex-wrap: wrap;
+  }
+  #error {
+    display: none; margin-top: 1rem; padding: .8rem 1rem; border-radius: 10px;
+    background: #7f1d1d; font-weight: 600;
+  }
+  .meta { color: #6b7480; font-size: .78rem; margin-top: .6rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Songs</h1>
+    <a class="nav" id="back-link" href="/">&larr; Dashboard</a>
+    <span class="spacer"></span>
+    <button id="upload-btn">&#8682;&nbsp; Upload song</button>
+    <input type="file" id="file-input" hidden>
+  </header>
+
+  <div id="error"></div>
+
+  <div id="notice">
+    <span>Changes take effect after restart.</span>
+    <button id="restart-btn">&#8635;&nbsp; Restart</button>
+  </div>
+
+  <div class="card">
+    <ul id="songs"></ul>
+    <div id="empty" hidden>No songs — upload one, or presses will be ignored.</div>
+    <div class="meta" id="meta"></div>
+  </div>
+</div>
+
+<script>
+  const token = new URLSearchParams(location.search).get("token");
+  const qs = token ? "?token=" + encodeURIComponent(token) : "";
+  document.getElementById("back-link").href = "/" + qs;
+
+  let maxUploadBytes = 0;
+  let acceptExts = [];
+
+  const errorEl = document.getElementById("error");
+  function showError(msg) {
+    errorEl.textContent = msg;
+    errorEl.style.display = "block";
+  }
+  function clearError() { errorEl.style.display = "none"; }
+
+  function markDirty() {
+    document.getElementById("notice").style.display = "flex";
+  }
+
+  function fmtSize(bytes) {
+    return bytes >= 1_000_000 ? (bytes / 1_000_000).toFixed(1) + " MB"
+                              : Math.round(bytes / 1000) + " kB";
+  }
+
+  function render(data) {
+    maxUploadBytes = data.max_upload_bytes;
+    acceptExts = data.extensions;
+    document.getElementById("file-input").accept = acceptExts.join(",");
+    const ul = document.getElementById("songs");
+    ul.innerHTML = "";
+    for (const s of data.songs) {
+      const li = document.createElement("li");
+      const name = document.createElement("span");
+      name.className = "song-name";
+      name.textContent = s.name;
+      const size = document.createElement("span");
+      size.className = "song-size";
+      size.textContent = fmtSize(s.size_bytes);
+      const del = document.createElement("button");
+      del.className = "delete-btn";
+      del.textContent = "Delete";
+      del.addEventListener("click", () => deleteSong(s.name, data.songs.length));
+      li.append(name, size, del);
+      ul.appendChild(li);
+    }
+    document.getElementById("empty").hidden = data.songs.length > 0;
+    document.getElementById("meta").textContent =
+      data.songs.length + " song(s) — uploads capped at " + fmtSize(maxUploadBytes);
+  }
+
+  function refresh() {
+    fetch("/api/songs" + qs).then(r => r.json()).then(render)
+      .catch(() => showError("Could not load the song list."));
+  }
+
+  function deleteSong(name, total) {
+    let msg = "Delete \"" + name + "\"?";
+    if (total <= 1) msg += "\n\nThis is the last song — after restart, presses will be ignored.";
+    if (!confirm(msg)) return;
+    clearError();
+    fetch("/api/songs/" + encodeURIComponent(name) + qs, { method: "DELETE" })
+      .then(r => r.json().then(d => {
+        if (!r.ok) throw new Error(d.error || "Delete failed.");
+        markDirty();
+        refresh();
+      }))
+      .catch(e => showError(e.message));
+  }
+
+  const fileInput = document.getElementById("file-input");
+  document.getElementById("upload-btn").addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files[0];
+    fileInput.value = "";
+    if (!file) return;
+    clearError();
+    if (maxUploadBytes && file.size > maxUploadBytes) {
+      showError("\"" + file.name + "\" is " + fmtSize(file.size) +
+                " — over the " + fmtSize(maxUploadBytes) + " limit.");
+      return;
+    }
+    const form = new FormData();
+    form.append("file", file);
+    fetch("/api/songs" + qs, { method: "POST", body: form })
+      .then(r => r.json().then(d => {
+        if (!r.ok) throw new Error(d.error || "Upload failed.");
+        markDirty();
+        refresh();
+      }))
+      .catch(e => showError(e.message));
+  });
+
+  document.getElementById("restart-btn").addEventListener("click", () => {
+    if (!confirm("Restart the whole program? Music stops and relays turn off.")) return;
+    document.getElementById("notice").firstElementChild.textContent =
+      "Restarting — refresh the page in a few seconds.";
+    fetch("/restart" + qs, { method: "POST" }).catch(() => {});
+  });
+
+  refresh();
+</script>
+</body>
+</html>

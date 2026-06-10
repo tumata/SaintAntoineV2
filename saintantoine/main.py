@@ -114,7 +114,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if cfg.web_enabled:
         from .web.server import create_app, run_web_server
 
-        app = create_app(controller, ring, lambda: request_shutdown(0), cfg)
+        app = create_app(controller, ring, lambda: request_shutdown(0), cfg, folder)
         threads.append(threading.Thread(target=run_web_server, name="web",
                                         args=(app, cfg), daemon=True))
 

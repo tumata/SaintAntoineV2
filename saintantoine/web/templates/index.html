@@ -23,6 +23,8 @@
   .badge.ok    { background: #166534; }
   .badge.bad   { background: #b91c1c; }
   .badge.off   { background: #4b5563; }
+  a.nav { color: #93b4f5; text-decoration: none; font-size: .9rem; margin-left: auto; }
+  a.nav:hover { text-decoration: underline; }
   .card {
     background: #1c2027; border: 1px solid #2a3038; border-radius: 12px;
     padding: 1.1rem 1.25rem; margin-top: 1rem;
@@ -64,6 +66,7 @@
     <span id="mode-badge" class="badge off">…</span>
     <span id="audio-badge" class="badge off">audio</span>
     <span id="conn-badge" class="badge off">connecting</span>
+    <a class="nav" id="songs-link" href="/songs">Songs &rarr;</a>
   </header>
 
   <div class="card">
@@ -94,6 +97,7 @@
 <script>
   const token = new URLSearchParams(location.search).get("token");
   const qs = token ? "?token=" + encodeURIComponent(token) : "";
+  document.getElementById("songs-link").href = "/songs" + qs;
 
   function setBadge(el, text, cls) {
     el.textContent = text;

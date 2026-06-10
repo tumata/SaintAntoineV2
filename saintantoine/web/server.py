@@ -10,9 +10,11 @@ import json
 import logging
 import threading
 import time
+from pathlib import Path
 from typing import Callable
 
 from flask import Flask, Response, jsonify, render_template, request
+from werkzeug.utils import secure_filename
 
 from ..config import Config
 from ..controller import Controller
@@ -26,9 +28,12 @@ def create_app(
     ring: RingBufferHandler,
     restart_cb: Callable[[], None],
     cfg: Config,
+    music_folder: Path,
 ) -> Flask:
     app = Flask(__name__)
+    app.config["MAX_CONTENT_LENGTH"] = cfg.upload_max_bytes
     token = cfg.web_auth_token
+    extensions = {e.lower() for e in cfg.audio_extensions}
 
     if token:
         @app.before_request
@@ -57,6 +62,78 @@ def create_app(
     @app.get("/status")
     def status():
         return jsonify(controller.status())
+
+    # ------------------------------------------------ song management (§11.1)
+
+    @app.get("/songs")
+    def songs_page():
+        return render_template("songs.html")
+
+    @app.get("/api/songs")
+    def list_songs():
+        songs = []
+        try:
+            for p in sorted(music_folder.iterdir()):
+                if p.is_file() and p.suffix.lower() in extensions:
+                    songs.append({"name": p.name, "size_bytes": p.stat().st_size})
+        except OSError as e:
+            log.error("Cannot read music folder %s: %s", music_folder, e)
+        return jsonify({
+            "songs": songs,
+            "extensions": sorted(extensions),
+            "max_upload_bytes": cfg.upload_max_bytes,
+        })
+
+    @app.post("/api/songs")
+    def upload_song():
+        f = request.files.get("file")
+        if f is None or not f.filename:
+            return jsonify({"error": "No file provided."}), 400
+        name = secure_filename(f.filename)
+        if not name or Path(name).suffix.lower() not in extensions:
+            return jsonify({"error": "Only %s files are accepted."
+                            % ", ".join(sorted(extensions))}), 400
+        dest = music_folder / name
+        if dest.exists():
+            return jsonify({"error": f"{name} already exists — delete it first."}), 409
+        # Atomic write: never let a startup scan see a half-uploaded file
+        tmp = music_folder / (name + ".part")
+        try:
+            f.save(tmp)
+            size = tmp.stat().st_size
+            tmp.rename(dest)
+        except OSError as e:
+            tmp.unlink(missing_ok=True)
+            log.error("Upload of %s failed: %s", name, e)
+            return jsonify({"error": "Could not save file."}), 500
+        log.info("Uploaded %s (%d bytes) from web dashboard (%s) — restart to apply.",
+                 name, size, request.remote_addr)
+        return jsonify({"ok": True, "name": name, "size_bytes": size}), 201
+
+    @app.delete("/api/songs/<name>")
+    def delete_song(name: str):
+        # Bare filenames only — no separators, no "..", no dotfiles. Allows
+        # spaces/accents so files copied in by other means stay deletable.
+        if "/" in name or "\\" in name or ".." in name or name.startswith("."):
+            return jsonify({"error": "Invalid name."}), 400
+        if Path(name).suffix.lower() not in extensions:
+            return jsonify({"error": "Invalid name."}), 400
+        target = (music_folder / name).resolve()
+        if target.parent != music_folder.resolve() or not target.is_file():
+            return jsonify({"error": "No such song."}), 404
+        try:
+            target.unlink()
+        except OSError as e:
+            log.error("Delete of %s failed: %s", name, e)
+            return jsonify({"error": "Could not delete file."}), 500
+        log.info("Deleted %s from web dashboard (%s) — restart to apply.",
+                 name, request.remote_addr)
+        return jsonify({"ok": True})
+
+    @app.errorhandler(413)
+    def too_large(_e):
+        return jsonify({"error": "File exceeds the %.1f MB upload limit."
+                        % (cfg.upload_max_bytes / 1_000_000)}), 413
 
     @app.get("/logs")
     def logs():
