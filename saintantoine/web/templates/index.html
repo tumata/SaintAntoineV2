@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Saint Antoine</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 1.5rem; background: #14171c; color: #e6e8eb;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  header { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+  h1 { font-size: 1.4rem; margin: 0; }
+  .badge {
+    font-size: .72rem; font-weight: 700; letter-spacing: .06em; padding: .2rem .55rem;
+    border-radius: 999px; text-transform: uppercase;
+  }
+  .badge.real  { background: #1d4ed8; }
+  .badge.mock  { background: #7c3aed; }
+  .badge.ok    { background: #166534; }
+  .badge.bad   { background: #b91c1c; }
+  .badge.off   { background: #4b5563; }
+  .card {
+    background: #1c2027; border: 1px solid #2a3038; border-radius: 12px;
+    padding: 1.1rem 1.25rem; margin-top: 1rem;
+  }
+  .state-row { display: flex; align-items: center; gap: 1.25rem; flex-wrap: wrap; }
+  #state { font-size: 1.15rem; font-weight: 700; }
+  #track { color: #9aa3ad; font-style: italic; }
+  .relays { display: flex; gap: 1rem; }
+  .relay { text-align: center; font-size: .72rem; color: #9aa3ad; }
+  .lamp {
+    width: 42px; height: 42px; border-radius: 50%; margin: 0 auto .3rem;
+    background: #3a414b; border: 3px solid #2a3038; transition: all .2s;
+  }
+  .lamp.on { background: #22c55e; border-color: #16a34a; box-shadow: 0 0 14px #22c55e88; }
+  .buttons { display: flex; gap: .75rem; margin-top: 1rem; flex-wrap: wrap; }
+  button {
+    font-size: 1rem; font-weight: 600; border: 0; border-radius: 10px;
+    padding: .7rem 1.4rem; cursor: pointer; color: #fff;
+  }
+  #press-btn { background: #2563eb; }
+  #press-btn:hover { background: #1d4ed8; }
+  #restart-btn { background: #7f1d1d; }
+  #restart-btn:hover { background: #991b1b; }
+  #banner {
+    display: none; margin-top: 1rem; padding: .8rem 1rem; border-radius: 10px;
+    background: #78350f; font-weight: 600;
+  }
+  #log {
+    height: 320px; overflow-y: auto; white-space: pre-wrap; margin: 0;
+    font: .78rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: #b7c0ca;
+  }
+  .meta { color: #6b7480; font-size: .78rem; margin-top: .6rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Saint Antoine</h1>
+    <span id="mode-badge" class="badge off">…</span>
+    <span id="audio-badge" class="badge off">audio</span>
+    <span id="conn-badge" class="badge off">connecting</span>
+  </header>
+
+  <div class="card">
+    <div class="state-row">
+      <div>
+        <div id="state">—</div>
+        <div id="track"></div>
+      </div>
+      <div class="relays">
+        <div class="relay"><div class="lamp" id="relay-0"></div>Relay 1</div>
+        <div class="relay"><div class="lamp" id="relay-1"></div>Relay 2</div>
+        <div class="relay"><div class="lamp" id="relay-2"></div>Relay 3</div>
+      </div>
+    </div>
+    <div class="buttons">
+      <button id="press-btn">&#9654;&nbsp; Press button</button>
+      <button id="restart-btn">&#8635;&nbsp; Restart</button>
+    </div>
+    <div id="banner">Restarting — refresh the page in a few seconds.</div>
+    <div class="meta" id="meta"></div>
+  </div>
+
+  <div class="card">
+    <pre id="log"></pre>
+  </div>
+</div>
+
+<script>
+  const token = new URLSearchParams(location.search).get("token");
+  const qs = token ? "?token=" + encodeURIComponent(token) : "";
+
+  function setBadge(el, text, cls) {
+    el.textContent = text;
+    el.className = "badge " + cls;
+  }
+
+  function applyStatus(s) {
+    document.getElementById("state").textContent = s.state;
+    document.getElementById("track").textContent = s.current_track || "";
+    (s.relays || []).forEach((on, i) => {
+      const lamp = document.getElementById("relay-" + i);
+      if (lamp) lamp.className = "lamp" + (on ? " on" : "");
+    });
+    setBadge(document.getElementById("mode-badge"), s.mode, s.mode === "real" ? "real" : "mock");
+    setBadge(document.getElementById("audio-badge"),
+             s.audio_healthy ? "audio ok" : "audio fault",
+             s.audio_healthy ? "ok" : "bad");
+    document.getElementById("meta").textContent =
+      s.tracks_total + " track(s), " + s.bag_remaining + " left in bag — up " + s.uptime_s + " s";
+  }
+
+  const logEl = document.getElementById("log");
+  function appendLog(line) {
+    const stick = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 8;
+    logEl.textContent += line + "\n";
+    if (stick) logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  fetch("/status" + qs).then(r => r.json()).then(applyStatus).catch(() => {});
+
+  const es = new EventSource("/events" + qs);
+  es.addEventListener("status", e => {
+    setBadge(document.getElementById("conn-badge"), "live", "ok");
+    applyStatus(JSON.parse(e.data));
+  });
+  es.addEventListener("log", e => appendLog(e.data));
+  es.onerror = () => setBadge(document.getElementById("conn-badge"), "disconnected", "bad");
+
+  document.getElementById("press-btn").addEventListener("click", () => {
+    fetch("/press" + qs, { method: "POST" })
+      .then(r => r.json()).then(d => applyStatus(d.status)).catch(() => {});
+  });
+
+  document.getElementById("restart-btn").addEventListener("click", () => {
+    if (!confirm("Restart the whole program? Music stops and relays turn off.")) return;
+    document.getElementById("banner").style.display = "block";
+    fetch("/restart" + qs, { method: "POST" }).catch(() => {});
+  });
+</script>
+</body>
+</html>

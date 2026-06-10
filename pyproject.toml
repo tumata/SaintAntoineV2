@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "saintantoine"
+version = "2.0.0"
+description = "Button-triggered relays + music player for Raspberry Pi, with mock mode and web dashboard"
+requires-python = ">=3.9"
+dependencies = [
+    "flask>=2.0",
+    "pyyaml>=5.4",
+]
+
+[project.optional-dependencies]
+pi = [
+    "gpiozero>=1.6",
+    "pygame>=2.0",
+]
+dev = [
+    "pytest>=7.0",
+]
+
+[project.scripts]
+saintantoine = "saintantoine.main:cli"
+
+[tool.setuptools.packages.find]
+include = ["saintantoine*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

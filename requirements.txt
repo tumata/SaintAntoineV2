@@ -1,0 +1,7 @@
+# Core (all platforms)
+flask>=2.0
+pyyaml>=5.4
+
+# On the Raspberry Pi, also install the hardware/audio extras:
+#   pip install gpiozero pygame
+# (or: pip install .[pi])

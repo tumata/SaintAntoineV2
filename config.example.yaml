@@ -1,0 +1,56 @@
+# Saint Antoine V2 configuration.
+# Copy to config.yaml and adjust. Every key is optional — defaults shown.
+# Any key can also be set via environment variable: SAINTANTOINE_<KEY_UPPERCASE>
+# (e.g. SAINTANTOINE_WEB_PORT=9090). CLI --mock/--real overrides `mode`.
+
+# auto = detect Raspberry Pi; or force "real" / "mock"
+mode: auto
+
+# ---------------------------------------------------------------- music ----
+music_folder: /home/pi/musique        # real mode
+mock_music_folder: MockMusics         # mock mode (relative to project root)
+audio_extensions: [.mp3, .wav, .ogg, .flac]
+
+# ----------------------------------------------------------------- gpio ----
+# BCM numbering. Matches the existing wiring (SPECS §4).
+button_pin: 22
+button_pull_up: false                 # pull-down (pull_up=False)
+relay_pins: [26, 20, 21]
+relay_active_high: false              # active-low relay board
+relay_initial_value: false            # relays OFF at startup
+
+# ----------------------------------- debounce / phantom-press defense ----
+hold_window_ms: 50                    # input must stay pressed this long
+sample_interval_ms: 5
+min_press_interval_ms: 300            # between accepted presses
+rapidfire_count: 3                    # >N presses within window => lockout
+rapidfire_window_s: 1.0
+rapidfire_cooldown_s: 2.0
+gpiozero_bounce_time_s: 0.02
+
+# ------------------------------------------------------ audio / watchdog ----
+startup_delay_s: 5.0                  # real mode only; lets audio/network settle
+supervisor_poll_s: 0.1
+health_probe_interval_s: 30.0         # periodic mixer health check while idle
+play_start_grace_s: 3.0               # playback must report busy within this
+max_reinit_attempts: 3                # mixer re-inits before escalating
+on_audio_fault: idle                  # idle = safe state | resume = replay track
+escalate_exit: true                   # exit non-zero after repeated faults (systemd respawns)
+force_mock_audio: false               # mock mode: simulate audio even if pygame is installed
+
+# ------------------------------------------------------------------ web ----
+web_enabled: true
+web_host: 0.0.0.0                     # reachable over Tailscale
+web_port: 8080
+web_auth_token: ""                    # optional shared token; "" = no auth (Tailscale gates access)
+
+# -------------------------------------------------------------- webhook ----
+webhook_url: ""                       # "" = disabled. POSTs {"track","timestamp"} on each play
+webhook_timeout_s: 5.0
+
+# -------------------------------------------------------------- logging ----
+log_file: /home/pi/saintantoine/log_script.txt   # mock mode falls back to ./saintantoine.log
+log_level: INFO
+log_ring_buffer_size: 500             # lines kept for the dashboard
+log_max_bytes: 5000000                # ~5 MB per file
+log_backup_count: 3

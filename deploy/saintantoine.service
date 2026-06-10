@@ -1,0 +1,29 @@
+# Saint Antoine V2 — systemd unit (SPECS §15)
+#
+# Install:
+#   sudo cp deploy/saintantoine.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now saintantoine
+#
+# Logs:   journalctl -u saintantoine -f
+# Note:   Restart=always is required — the dashboard Restart button and the
+#         audio-watchdog escalation both exit the process and rely on systemd
+#         to respawn it. StartLimit* keeps a crash loop from hammering.
+
+[Unit]
+Description=Saint Antoine button/relay/music controller
+After=sound.target network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=120
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/SaintAntoineV2
+ExecStart=/usr/bin/python3 -m saintantoine --real --config /home/pi/SaintAntoineV2/config.yaml
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
