@@ -185,18 +185,35 @@ class Sampler:
             while self._edges and self._edges[0][1] < cutoff:
                 self._edges.popleft()
 
+    # time.sleep() can overshoot by milliseconds (kernel tick / idle wakeup
+    # latency, especially on a Pi) — only trust it above this margin and
+    # spin the remainder. Costs CPU, but accuracy is the point of a scope.
+    SLEEP_MARGIN_S = 0.0015
+
     def run(self, stop_event: threading.Event) -> None:
         """Thread target: poll at sample_hz (best effort, resync if behind)."""
         interval = 1.0 / self.sample_hz
         next_t = self._time_fn()
+        last_warn = 0.0
         while not stop_event.is_set():
-            self.tick(self._time_fn())
+            now = self._time_fn()
+            self.tick(now)
+            if (self._achieved_hz and self._achieved_hz < 0.7 * self.sample_hz
+                    and now - last_warn > 30):
+                last_warn = now
+                log.warning(
+                    "Sampling at %.0f Hz of the %.0f Hz target — pulses shorter "
+                    "than ~%.0f ms can be missed or aliased.",
+                    self._achieved_hz, self.sample_hz, 1000 / self._achieved_hz)
             next_t += interval
-            delay = next_t - self._time_fn()
-            if delay > 0:
-                time.sleep(delay)
-            else:
-                next_t = self._time_fn()  # fell behind — don't try to catch up
+            remaining = next_t - self._time_fn()
+            if remaining < -0.05:
+                next_t = self._time_fn()  # fell hopelessly behind — resync
+                continue
+            while remaining > 0:
+                if remaining > self.SLEEP_MARGIN_S:
+                    time.sleep(remaining - 0.001)
+                remaining = next_t - self._time_fn()
 
     # ------------------------------------------------- live reconfiguration
 
@@ -280,7 +297,15 @@ class Sampler:
     def snapshot_since(self, seq: int) -> dict:
         """Edges newer than seq + current state, atomically (feeds SSE, §6)."""
         with self._lock:
-            edges = [e for e in self._edges if e[0] > seq]
+            # Scan from the right: only a few edges are usually newer than
+            # seq, but a noisy line can hold thousands — a full scan here
+            # (under the lock) starves the polling loop and tanks the rate.
+            edges = []
+            for e in reversed(self._edges):
+                if e[0] <= seq:
+                    break
+                edges.append(e)
+            edges.reverse()
             return {
                 "now": self._time_fn(),
                 "epoch": self._epoch,

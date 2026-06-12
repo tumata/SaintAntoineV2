@@ -99,7 +99,7 @@
   let edges = [];            // {t, v} in server monotonic time, alternating levels
   let level = 0, idle = 0, epoch = null, active = true, errText = "";
   let pin = null, pull = null, mode = null;
-  let windowS = 10, glitchS = 0.02;
+  let windowS = 10, glitchS = 0.02, sampleHz = null;
   let offset = null;         // performance.now()/1000 - server now (re-synced each message)
   let paused = false, pausedAt = 0;
 
@@ -112,6 +112,7 @@
     if (s.mode) mode = s.mode;
     if (s.window_s) windowS = s.window_s;
     if (s.glitch_ms) glitchS = s.glitch_ms / 1000;
+    if (s.sample_hz) sampleHz = s.sample_hz;
     setBadge($("mode-badge"), mode || "…", mode === "real" ? "real" : "mock");
     setBadge($("pin-badge"),
              active ? "GPIO" + pin + " · pull-" + pull : "NO PIN",
@@ -123,7 +124,14 @@
     $("stat-edges").textContent = c.edges;
     $("stat-glitches").textContent = c.glitches;
     $("stat-presses").textContent = c.presses;
-    $("stat-hz").textContent = c.achieved_hz ? c.achieved_hz + " Hz" : "—";
+    const hzEl = $("stat-hz");
+    hzEl.textContent = c.achieved_hz ? c.achieved_hz + " Hz" : "—";
+    const degraded = sampleHz && c.achieved_hz && c.achieved_hz < 0.7 * sampleHz;
+    hzEl.style.color = degraded ? "#f87171" : "";
+    hzEl.title = degraded
+      ? "Sampling far below target — pulses shorter than ~" +
+        Math.ceil(1000 / c.achieved_hz) + " ms may be missed or aliased."
+      : "";
   }
 
   fetch("/status").then(r => r.json()).then(s => {
