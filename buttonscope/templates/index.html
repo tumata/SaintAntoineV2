@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ButtonScope</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 1.5rem; background: #14171c; color: #e6e8eb;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  header { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+  h1 { font-size: 1.4rem; margin: 0; }
+  .badge {
+    font-size: .72rem; font-weight: 700; letter-spacing: .06em; padding: .2rem .55rem;
+    border-radius: 999px; text-transform: uppercase;
+  }
+  .badge.real { background: #1d4ed8; }
+  .badge.mock { background: #7c3aed; }
+  .badge.ok   { background: #166534; }
+  .badge.bad  { background: #b91c1c; }
+  .badge.off  { background: #4b5563; }
+  .badge.pin  { background: #374151; text-transform: none; letter-spacing: 0; }
+  .card {
+    background: #1c2027; border: 1px solid #2a3038; border-radius: 12px;
+    padding: 1.1rem 1.25rem; margin-top: 1rem;
+  }
+  #scope { width: 100%; height: 280px; display: block; background: #0e1116; border-radius: 8px; }
+  .stats { display: flex; gap: 1.6rem; flex-wrap: wrap; margin-top: .9rem; }
+  .stat { font-size: .78rem; color: #9aa3ad; }
+  .stat b { display: block; font-size: 1.15rem; color: #e6e8eb; }
+  .stat.glitch b { color: #f59e0b; }
+  .buttons { display: flex; gap: .75rem; margin-top: 1rem; flex-wrap: wrap; align-items: center; }
+  button {
+    font-size: .95rem; font-weight: 600; border: 0; border-radius: 10px;
+    padding: .6rem 1.2rem; cursor: pointer; color: #fff; background: #2563eb;
+  }
+  button:hover { background: #1d4ed8; }
+  button.secondary { background: #374151; }
+  button.secondary:hover { background: #4b5563; }
+  .cfg { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+  .cfg label { font-size: .82rem; color: #9aa3ad; }
+  .cfg input, .cfg select {
+    background: #0e1116; color: #e6e8eb; border: 1px solid #2a3038; border-radius: 8px;
+    padding: .45rem .6rem; font-size: .95rem;
+  }
+  .cfg input { width: 5rem; }
+  #cfg-msg { font-size: .82rem; color: #f87171; }
+  #cfg-msg.ok { color: #4ade80; }
+  .meta { color: #6b7480; font-size: .78rem; margin-top: .6rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>ButtonScope</h1>
+    <span id="mode-badge" class="badge off">…</span>
+    <span id="pin-badge" class="badge pin">…</span>
+    <span id="conn-badge" class="badge off">connecting</span>
+  </header>
+
+  <div class="card">
+    <canvas id="scope"></canvas>
+    <div class="stats">
+      <div class="stat">Level<b id="stat-level">—</b></div>
+      <div class="stat">Edges<b id="stat-edges">0</b></div>
+      <div class="stat glitch">Glitches<b id="stat-glitches">0</b></div>
+      <div class="stat">Presses<b id="stat-presses">0</b></div>
+      <div class="stat">Sample rate<b id="stat-hz">—</b></div>
+    </div>
+    <div class="buttons">
+      <button id="pause-btn" class="secondary">&#10074;&#10074;&nbsp; Pause</button>
+      <button id="reset-btn" class="secondary">Reset counters</button>
+    </div>
+    <div class="meta" id="meta"></div>
+  </div>
+
+  <div class="card">
+    <div class="cfg">
+      <label for="pin-input">GPIO (BCM)</label>
+      <input id="pin-input" type="number" min="0" max="27" value="22">
+      <label for="pull-select">Pull</label>
+      <select id="pull-select">
+        <option value="down">down</option>
+        <option value="up">up</option>
+        <option value="none">none</option>
+      </select>
+      <button id="apply-btn">Apply</button>
+      <span id="cfg-msg"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+  const HIGH_V = 3.3;
+  let edges = [];            // {t, v} in server monotonic time, alternating levels
+  let level = 0, idle = 0, epoch = null, active = true, errText = "";
+  let pin = null, pull = null, mode = null;
+  let windowS = 10, glitchS = 0.02;
+  let offset = null;         // performance.now()/1000 - server now (re-synced each message)
+  let paused = false, pausedAt = 0;
+
+  const $ = id => document.getElementById(id);
+
+  function setBadge(el, text, cls) { el.textContent = text; el.className = "badge " + cls; }
+
+  function applyState(s) {
+    pin = s.pin; pull = s.pull; active = s.active; errText = s.error || "";
+    if (s.mode) mode = s.mode;
+    if (s.window_s) windowS = s.window_s;
+    if (s.glitch_ms) glitchS = s.glitch_ms / 1000;
+    setBadge($("mode-badge"), mode || "…", mode === "real" ? "real" : "mock");
+    setBadge($("pin-badge"),
+             active ? "GPIO" + pin + " · pull-" + pull : "NO PIN",
+             active ? "pin" : "bad");
+    $("meta").textContent = active ? "" : (errText || "No pin claimed — apply a new pin below.");
+  }
+
+  function applyCounters(c) {
+    $("stat-edges").textContent = c.edges;
+    $("stat-glitches").textContent = c.glitches;
+    $("stat-presses").textContent = c.presses;
+    $("stat-hz").textContent = c.achieved_hz ? c.achieved_hz + " Hz" : "—";
+  }
+
+  fetch("/status").then(r => r.json()).then(s => {
+    applyState(s);
+    applyCounters(s.counters);
+    $("pin-input").value = s.pin;
+    $("pull-select").value = s.pull;
+  }).catch(() => {});
+
+  const es = new EventSource("/events");
+  es.onopen = () => { edges = []; setBadge($("conn-badge"), "live", "ok"); };
+  es.onerror = () => setBadge($("conn-badge"), "disconnected", "bad");
+  es.addEventListener("sample", e => {
+    const m = JSON.parse(e.data);
+    if (epoch !== null && m.epoch !== epoch) edges = [];
+    epoch = m.epoch;
+    offset = performance.now() / 1000 - m.now;
+    level = m.level === null ? idle : m.level;
+    idle = m.idle;
+    edges.push(...m.edges);
+    applyState(m);
+    applyCounters(m.counters);
+  });
+
+  // ------------------------------------------------------------- the graph
+  const canvas = $("scope"), ctx = canvas.getContext("2d");
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = canvas.clientWidth * dpr;
+    canvas.height = canvas.clientHeight * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  function serverNow() { return performance.now() / 1000 - offset; }
+
+  function draw() {
+    requestAnimationFrame(draw);
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    ctx.clearRect(0, 0, w, h);
+    if (offset === null) return;
+
+    const padL = 46, padR = 12, padT = 12, padB = 24;
+    const plotW = w - padL - padR;
+    const yHigh = padT + 14, yLow = h - padB - 14;
+    const now = paused ? pausedAt : serverNow();
+    const t0 = now - windowS;
+    if (!paused) {
+      // Keep one second of slack so the segment crossing the left edge survives.
+      while (edges.length && edges[0].t < t0 - 1) edges.shift();
+    }
+    const xFor = t => padL + ((t - t0) / windowS) * plotW;
+    const yFor = lvl => (lvl ? yHigh : yLow);
+
+    // Grid: one vertical line per second + the two logic levels.
+    ctx.font = "11px ui-monospace, Menlo, monospace";
+    ctx.strokeStyle = "#1f242c";
+    ctx.fillStyle = "#6b7480";
+    ctx.lineWidth = 1;
+    for (let s = Math.ceil(t0); s <= now; s++) {
+      const x = xFor(s);
+      ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, h - padB); ctx.stroke();
+      const rel = Math.round(s - now);
+      if (rel % 2 === 0) {
+        ctx.textAlign = "center";
+        ctx.fillText(rel === 0 ? "now" : rel + "s", x, h - 8);
+      }
+    }
+    for (const [lvl, label] of [[1, HIGH_V.toFixed(1) + " V"], [0, "0 V"]]) {
+      const y = yFor(lvl);
+      ctx.strokeStyle = "#2a3038";
+      ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(w - padR, y); ctx.stroke();
+      ctx.textAlign = "right";
+      ctx.fillText(label, padL - 6, y + 4);
+    }
+
+    // Step plot from edges. Edge.v is the level AFTER the edge and edges
+    // alternate, so the level before the first in-window edge is its inverse.
+    const win = edges.filter(e => e.t >= t0 && e.t <= now);
+    let lvl = win.length ? 1 - win[0].v : level;
+    let t = t0;
+    const segs = [];
+    for (const e of win) { segs.push({ a: t, b: e.t, lvl }); lvl = e.v; t = e.t; }
+    segs.push({ a: t, b: now, lvl });
+
+    ctx.lineWidth = 2;
+    let prevY = null;
+    for (const s of segs) {
+      const y = yFor(s.lvl);
+      // The trailing segment is still open — don't judge it a glitch yet.
+      const isGlitch = s.lvl !== idle && s.b < now && (s.b - s.a) < glitchS;
+      if (prevY !== null) {
+        ctx.strokeStyle = "#3a414b";
+        ctx.beginPath(); ctx.moveTo(xFor(s.a), prevY); ctx.lineTo(xFor(s.a), y); ctx.stroke();
+      }
+      ctx.strokeStyle = isGlitch ? "#f59e0b" : "#22d3ee";
+      ctx.beginPath();
+      const x1 = Math.max(xFor(s.a), padL);
+      let x2 = xFor(s.b);
+      // A real glitch is sub-pixel at this scale — widen so it jumps out.
+      if (isGlitch && x2 - x1 < 3) x2 = x1 + 3;
+      ctx.moveTo(x1, y);
+      ctx.lineTo(x2, y);
+      ctx.stroke();
+      prevY = y;
+    }
+
+    $("stat-level").textContent = active
+      ? (level ? "HIGH (" + HIGH_V + " V)" : "LOW (0 V)") : "—";
+  }
+  requestAnimationFrame(draw);
+
+  // -------------------------------------------------------------- controls
+  $("pause-btn").addEventListener("click", () => {
+    paused = !paused;
+    if (paused) pausedAt = serverNow();
+    $("pause-btn").innerHTML = paused ? "&#9654;&nbsp; Resume" : "&#10074;&#10074;&nbsp; Pause";
+  });
+
+  $("reset-btn").addEventListener("click", () => {
+    fetch("/reset", { method: "POST" })
+      .then(r => r.json()).then(d => applyCounters(d.status.counters)).catch(() => {});
+  });
+
+  $("apply-btn").addEventListener("click", () => {
+    const body = { pin: parseInt($("pin-input").value, 10), pull: $("pull-select").value };
+    const msg = $("cfg-msg");
+    msg.textContent = ""; msg.className = "";
+    fetch("/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(r => r.json().then(d => ({ ok: r.ok, d }))).then(({ ok, d }) => {
+      applyState(d.status);
+      if (ok) {
+        edges = [];
+        applyCounters(d.status.counters);
+        msg.textContent = "Now watching GPIO" + d.status.pin;
+        msg.className = "ok";
+      } else {
+        msg.textContent = d.error +
+          (d.status.active ? " — kept watching GPIO" + d.status.pin : "");
+        $("pin-input").value = d.status.pin;
+        $("pull-select").value = d.status.pull;
+      }
+    }).catch(() => { msg.textContent = "Request failed."; });
+  });
+</script>
+</body>
+</html>

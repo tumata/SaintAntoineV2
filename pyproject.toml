@@ -23,9 +23,14 @@ dev = [
 
 [project.scripts]
 saintantoine = "saintantoine.main:cli"
+buttonscope = "buttonscope.__main__:cli"
 
 [tool.setuptools.packages.find]
-include = ["saintantoine*"]
+include = ["saintantoine*", "buttonscope*"]
+
+[tool.setuptools.package-data]
+saintantoine = ["web/templates/*.html"]
+buttonscope = ["templates/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
