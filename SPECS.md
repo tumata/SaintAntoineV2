@@ -38,7 +38,7 @@
 | D1 | **Music selection** | **Shuffle bag**: shuffle all tracks into a queue, play through the entire queue, then reshuffle. Guarantee the last track of one cycle is not the first of the next. Every track plays once before any repeats. |
 | D2 | **Web UI role** | **Always on, full dashboard** — runs on both Pi and dev machine. On the Pi it drives real hardware; the web fake-press works *alongside* the physical button. |
 | D3 | **Debounce strategy** | **Hold-to-trigger** (sampled/integrating debounce) + `bounce_time` + minimum inter-press interval + rapid-fire lockout. Software complemented by a **hardware RC filter** recommendation (see §8). |
-| D4 | **Hardware** | **Reuse current wiring** as defaults, all overridable via config: button on **GPIO22** (`pull_up=False`, i.e. pull-down), 3 relays on **GPIO26 / GPIO20 / GPIO21**, **active-low** (`active_high=False`). |
+| D4 | **Hardware** | **Reuse current wiring** as defaults, all overridable via config: button on **GPIO22** (`pull_up=True` — button to GND, pressed = LOW; **revised 2026-06-12** after a ButtonScope measurement, see §4), 3 relays on **GPIO26 / GPIO20 / GPIO21**, **active-low** (`active_high=False`). |
 | D5 | **Webhook** | **Keep, but optional + generic**: a configurable webhook URL, fire-and-forget, disabled when no URL is set. Sends `{track, timestamp}` (Airtable-compatible). |
 | D6 | **Boot** | **systemd service + configurable startup delay**, with clean restart/kill via `systemctl` (no reboot needed). |
 | D7 | **Audio formats** | Support **multiple formats** (`.mp3`, `.wav`, `.ogg`, `.flac`). |
@@ -71,10 +71,18 @@
 
 | Function | GPIO (BCM) | Config | Notes |
 |----------|-----------|--------|-------|
-| Push button | 22 | `pull_up=False` (pull-down) | Was GPIO27 originally; 27 is dead on the user's board. |
+| Push button | 22 | `pull_up=True` (pull-up; pressed = LOW) | Was GPIO27 originally; 27 is dead on the user's board. Pull revised 2026-06-12, see below. |
 | Relay 1 | 26 | `active_high=False`, `initial_value=False` | Active-low relay board. |
 | Relay 2 | 20 | `active_high=False`, `initial_value=False` | |
 | Relay 3 | 21 | `active_high=False`, `initial_value=False` | |
+
+**Measured 2026-06-12 (ButtonScope, SPECS_BUTTONSCOPE.md):** the button is wired
+**GPIO22 ↔ GND** with an external pull-up resistor on the line — pressing pulls the
+line LOW. The original `pull_up=False` (internal pull-down) configuration *fought*
+that external pull-up, parking the idle line at an ambiguous mid-level that read as
+noisy-HIGH (= "pressed", with chatter): the root cause of the phantom presses.
+With `pull_up=True` the line idles at a clean 3.3 V and presses are clean drops to
+0 V (~4 sub-20 ms glitches per minute, rejected by the §8 hold-to-trigger window).
 
 **Recommended hardware mitigation for phantom presses (see §8):**
 - A pull resistor on the button line (gpiozero's internal pull is used by default; an external ~10 kΩ adds robustness).

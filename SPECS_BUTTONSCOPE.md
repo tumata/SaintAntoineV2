@@ -172,7 +172,7 @@ defaults matching the main app's wiring (main spec §4):
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--pin` | `22` | **Initial** BCM pin to observe — changeable live from the web page (§5.1). |
-| `--pull` | `down` | **Initial** pull: `down` / `up` / `none` (external pull) — changeable live (§5.1). |
+| `--pull` | `up` | **Initial** pull: `down` / `up` / `none` — changeable live (§5.1). Default matches the main app's wiring (button to GND, main spec §4 as revised 2026-06-12 — a revision this very tool produced). |
 | `--port` | `8081` | Web port. |
 | `--host` | `0.0.0.0` | Bind address. |
 | `--sample-hz` | `1000` | Target polling rate (best effort). |

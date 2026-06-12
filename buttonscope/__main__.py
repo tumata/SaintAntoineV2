@@ -28,8 +28,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         description="Live button-input voltage viewer (digital sampling, web graph)")
     parser.add_argument("--pin", type=int, default=22,
                         help="initial BCM pin to observe (changeable live, default 22)")
-    parser.add_argument("--pull", choices=PULLS, default="down",
-                        help="initial pull (changeable live, default down)")
+    parser.add_argument("--pull", choices=PULLS, default="up",
+                        help="initial pull (changeable live, default up — matches "
+                             "the button-to-GND wiring, SPECS §4)")
     parser.add_argument("--port", type=int, default=8081, help="web port (default 8081)")
     parser.add_argument("--host", default="0.0.0.0", help="bind address")
     parser.add_argument("--sample-hz", type=float, default=1000.0,

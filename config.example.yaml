@@ -14,7 +14,10 @@ audio_extensions: [.mp3, .wav, .ogg, .flac]
 # ----------------------------------------------------------------- gpio ----
 # BCM numbering. Matches the existing wiring (SPECS §4).
 button_pin: 22
-button_pull_up: false                 # pull-down (pull_up=False)
+button_pull_up: true                  # button wired GPIO22 ↔ GND; pressed = LOW.
+                                      # ButtonScope diagnosis 2026-06-12: pull-down
+                                      # fought the line's external pull-up resistor
+                                      # and caused the phantom presses (SPECS §4).
 relay_pins: [26, 20, 21]
 relay_active_high: false              # active-low relay board
 relay_initial_value: false            # relays OFF at startup

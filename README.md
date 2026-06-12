@@ -72,7 +72,7 @@ documented in [deploy/LEGACY_V1.md](deploy/LEGACY_V1.md).
 
 | Function | GPIO (BCM) | Notes |
 |---|---|---|
-| Button | 22 | pull-down (`button_pull_up: false`) |
+| Button | 22 | pull-up (`button_pull_up: true`) — button to GND, pressed = LOW |
 | Relays | 26, 20, 21 | active-low board, OFF at startup |
 
 Phantom-press hardening is in software (hold-to-trigger sampling, min interval,

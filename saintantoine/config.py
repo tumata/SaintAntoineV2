@@ -37,7 +37,9 @@ class Config:
 
     # GPIO (BCM numbering)
     button_pin: int = 22
-    button_pull_up: bool = False
+    # Pull-up: button wired GPIO ↔ GND, pressed = LOW (ButtonScope diagnosis
+    # 2026-06-12 — pull-down fought the external pull-up resistor; SPECS §4)
+    button_pull_up: bool = True
     relay_pins: List[int] = field(default_factory=lambda: [26, 20, 21])
     relay_active_high: bool = False
     relay_initial_value: bool = False
