@@ -65,6 +65,9 @@ journalctl -u saintantoine -f         # live logs
 
 Dashboard over Tailscale: `http://<pi-tailscale-name>:8080`.
 
+Upgrading from V1? The old crontab-based setup and how it was retired are
+documented in [deploy/LEGACY_V1.md](deploy/LEGACY_V1.md).
+
 ## Wiring (defaults, all in config.yaml)
 
 | Function | GPIO (BCM) | Notes |
