@@ -4,6 +4,7 @@ import io
 
 import pytest
 
+from saintantoine import processing
 from saintantoine.controller import PLAYING
 from saintantoine.logging_setup import RingBufferHandler
 from saintantoine.web.server import create_app
@@ -85,12 +86,36 @@ def test_token_required_when_configured(tmp_path, make_harness):
     assert client.get("/api/songs?token=sekret").status_code == 200
 
 
-# --------------------------------------------------- song management (§11.1)
+# --------------------------------------------- song management (§11.1, §11.2)
 
 
-def _upload(client, filename, data=b"\x00\x01"):
-    return client.post("/api/songs",
-                       data={"file": (io.BytesIO(data), filename)},
+@pytest.fixture
+def fake_processing(monkeypatch):
+    """Pretend ffmpeg exists; record processing calls instead of running it.
+
+    Keeps tests independent of whether ffmpeg is installed on the machine.
+    """
+    calls = {"clips": [], "normalized": []}
+    monkeypatch.setattr(processing, "ffmpeg_available", lambda: True)
+
+    def fake_clip(src, dest, start_s, clip_s, target_lufs):
+        calls["clips"].append((src.name, dest.name, start_s, clip_s, target_lufs))
+        dest.write_bytes(b"clip:" + src.read_bytes())
+
+    def fake_norm(path, target_lufs):
+        calls["normalized"].append((path.name, target_lufs))
+        path.write_bytes(b"norm:" + path.read_bytes())
+
+    monkeypatch.setattr(processing, "process_clip", fake_clip)
+    monkeypatch.setattr(processing, "normalize_in_place", fake_norm)
+    return calls
+
+
+def _upload(client, filename, data=b"\x00\x01", start_s="3.5"):
+    payload = {"file": (io.BytesIO(data), filename)}
+    if start_s is not None:
+        payload["start_s"] = start_s
+    return client.post("/api/songs", data=payload,
                        content_type="multipart/form-data")
 
 
@@ -108,33 +133,74 @@ def test_list_songs(web):
     assert all(s["size_bytes"] == 1 for s in data["songs"])
     assert data["max_upload_bytes"] == harness.cfg.upload_max_bytes
     assert ".mp3" in data["extensions"]
+    assert data["clip_duration_s"] == harness.cfg.clip_duration_s
+    assert isinstance(data["ffmpeg_available"], bool)
 
 
-def test_upload_song(web):
+def test_upload_song(web, fake_processing):
     client, harness, _, _ = web
-    response = _upload(client, "new song.mp3", b"abc")
+    response = _upload(client, "new song.mp3", b"abc", start_s="42.5")
     assert response.status_code == 201
     assert response.get_json()["name"] == "new_song.mp3"  # secure_filename applied
     saved = harness.music_folder / "new_song.mp3"
-    assert saved.read_bytes() == b"abc"
+    assert saved.read_bytes() == b"clip:abc"  # went through process_clip
+    [(src, dest, start, clip, target)] = fake_processing["clips"]
+    assert src.startswith("new_song.mp3.") and src.endswith(".part")  # raw temp
+    assert (dest, start, clip, target) == ("new_song.mp3", 42.5,
+                                           harness.cfg.clip_duration_s,
+                                           harness.cfg.loudness_target_lufs)
+    assert not list(harness.music_folder.glob("*.part"))  # raw temp cleaned up
+
+
+def test_upload_requires_valid_start(web, fake_processing):
+    client, harness, _, _ = web
+    assert _upload(client, "a.mp3", start_s=None).status_code == 400
+    assert _upload(client, "a.mp3", start_s="abc").status_code == 400
+    assert _upload(client, "a.mp3", start_s="-1").status_code == 400
+    assert _upload(client, "a.mp3", start_s="nan").status_code == 400
+    assert not (harness.music_folder / "a.mp3").exists()
+    assert fake_processing["clips"] == []
+
+
+def test_upload_503_without_ffmpeg(web, monkeypatch):
+    client, harness, _, _ = web
+    monkeypatch.setattr(processing, "ffmpeg_available", lambda: False)
+    response = _upload(client, "a.mp3")
+    assert response.status_code == 503
+    assert "ffmpeg" in response.get_json()["error"]
+    assert not (harness.music_folder / "a.mp3").exists()
+
+
+def test_upload_processing_failure_cleans_up(web, monkeypatch):
+    client, harness, _, _ = web
+    monkeypatch.setattr(processing, "ffmpeg_available", lambda: True)
+
+    def boom(*args, **kwargs):
+        raise processing.ProcessingError("clip failed")
+
+    monkeypatch.setattr(processing, "process_clip", boom)
+    response = _upload(client, "a.mp3")
+    assert response.status_code == 500
+    assert "clip failed" in response.get_json()["error"]
+    assert not (harness.music_folder / "a.mp3").exists()
     assert not list(harness.music_folder.glob("*.part"))
 
 
-def test_upload_rejects_bad_extension(web):
+def test_upload_rejects_bad_extension(web, fake_processing):
     client, harness, _, _ = web
     assert _upload(client, "evil.txt").status_code == 400
     assert _upload(client, "noext").status_code == 400
     assert not (harness.music_folder / "evil.txt").exists()
 
 
-def test_upload_rejects_collision(web):
+def test_upload_rejects_collision(web, fake_processing):
     client, harness, _, _ = web
     response = _upload(client, "song0.mp3", b"overwritten")
     assert response.status_code == 409
     assert (harness.music_folder / "song0.mp3").read_bytes() == b"\x00"
 
 
-def test_upload_rejects_oversize(make_harness):
+def test_upload_rejects_oversize(make_harness, fake_processing):
     harness = make_harness()
     harness.cfg.upload_max_bytes = 10
     app = create_app(harness.controller, RingBufferHandler(10), lambda: None,
@@ -145,6 +211,46 @@ def test_upload_rejects_oversize(make_harness):
     assert response.status_code == 413
     assert "limit" in response.get_json()["error"]
     assert not (harness.music_folder / "big.mp3").exists()
+
+
+def test_normalize_song(web, fake_processing):
+    client, harness, _, _ = web
+    response = client.post("/api/songs/song1.mp3/normalize")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["name"] == "song1.mp3"
+    assert (harness.music_folder / "song1.mp3").read_bytes() == b"norm:\x00"
+    assert data["size_bytes"] == 6
+    assert fake_processing["normalized"] == [
+        ("song1.mp3", harness.cfg.loudness_target_lufs)]
+
+
+def test_normalize_503_without_ffmpeg(web, monkeypatch):
+    client, _, _, _ = web
+    monkeypatch.setattr(processing, "ffmpeg_available", lambda: False)
+    assert client.post("/api/songs/song1.mp3/normalize").status_code == 503
+
+
+def test_normalize_rejects_bad_names(web, fake_processing):
+    client, harness, _, _ = web
+    (harness.music_folder / "notes.txt").write_text("keep me")
+    assert client.post("/api/songs/ghost.mp3/normalize").status_code == 404
+    assert client.post("/api/songs/..secret.mp3/normalize").status_code == 400
+    assert client.post("/api/songs/notes.txt/normalize").status_code == 400
+    assert fake_processing["normalized"] == []
+
+
+def test_normalize_failure_keeps_file(web, monkeypatch):
+    client, harness, _, _ = web
+    monkeypatch.setattr(processing, "ffmpeg_available", lambda: True)
+
+    def boom(*args, **kwargs):
+        raise processing.ProcessingError("normalize failed")
+
+    monkeypatch.setattr(processing, "normalize_in_place", boom)
+    response = client.post("/api/songs/song1.mp3/normalize")
+    assert response.status_code == 500
+    assert (harness.music_folder / "song1.mp3").read_bytes() == b"\x00"
 
 
 def test_delete_song(web):

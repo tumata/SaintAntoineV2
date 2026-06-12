@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -16,6 +18,7 @@ from typing import Callable
 from flask import Flask, Response, jsonify, render_template, request
 from werkzeug.utils import secure_filename
 
+from .. import processing
 from ..config import Config
 from ..controller import Controller
 from ..logging_setup import RingBufferHandler
@@ -65,6 +68,19 @@ def create_app(
 
     # ------------------------------------------------ song management (§11.1)
 
+    def _valid_song_name(name: str) -> bool:
+        # Bare filenames only — no separators, no "..", no dotfiles. Allows
+        # spaces/accents so files copied in by other means stay manageable.
+        if "/" in name or "\\" in name or ".." in name or name.startswith("."):
+            return False
+        return Path(name).suffix.lower() in extensions
+
+    def _resolve_song(name: str) -> Path | None:
+        target = (music_folder / name).resolve()
+        if target.parent != music_folder.resolve() or not target.is_file():
+            return None
+        return target
+
     @app.get("/songs")
     def songs_page():
         return render_template("songs.html")
@@ -82,13 +98,24 @@ def create_app(
             "songs": songs,
             "extensions": sorted(extensions),
             "max_upload_bytes": cfg.upload_max_bytes,
+            "clip_duration_s": cfg.clip_duration_s,
+            "ffmpeg_available": processing.ffmpeg_available(),
         })
 
     @app.post("/api/songs")
     def upload_song():
+        if not processing.ffmpeg_available():
+            return jsonify({"error": "ffmpeg is not installed on the server — "
+                                     "uploads are disabled."}), 503
         f = request.files.get("file")
         if f is None or not f.filename:
             return jsonify({"error": "No file provided."}), 400
+        try:
+            start_s = float(request.form["start_s"])
+        except (KeyError, ValueError):
+            return jsonify({"error": "Missing or invalid start_s."}), 400
+        if not start_s >= 0:  # also rejects NaN
+            return jsonify({"error": "Missing or invalid start_s."}), 400
         name = secure_filename(f.filename)
         if not name or Path(name).suffix.lower() not in extensions:
             return jsonify({"error": "Only %s files are accepted."
@@ -96,30 +123,60 @@ def create_app(
         dest = music_folder / name
         if dest.exists():
             return jsonify({"error": f"{name} already exists — delete it first."}), 409
-        # Atomic write: never let a startup scan see a half-uploaded file
-        tmp = music_folder / (name + ".part")
+        # The raw upload lands under a unique .part name (invisible to the
+        # startup scan, immune to concurrent-upload collisions); process_clip
+        # writes dest atomically itself.
+        fd, raw_name = tempfile.mkstemp(prefix=name + ".", suffix=".part",
+                                        dir=str(music_folder))
+        os.close(fd)
+        raw = Path(raw_name)
         try:
-            f.save(tmp)
-            size = tmp.stat().st_size
-            tmp.rename(dest)
+            f.save(raw)
+            processing.process_clip(raw, dest, start_s=start_s,
+                                    clip_s=cfg.clip_duration_s,
+                                    target_lufs=cfg.loudness_target_lufs)
+            size = dest.stat().st_size
+        except processing.ProcessingError as e:
+            log.error("Upload of %s failed: %s", name, e)
+            return jsonify({"error": f"Could not process audio: {e}"}), 500
         except OSError as e:
-            tmp.unlink(missing_ok=True)
             log.error("Upload of %s failed: %s", name, e)
             return jsonify({"error": "Could not save file."}), 500
-        log.info("Uploaded %s (%d bytes) from web dashboard (%s) — restart to apply.",
-                 name, size, request.remote_addr)
+        finally:
+            raw.unlink(missing_ok=True)
+        log.info("Uploaded %s: %.0f s clip from %.1f s, normalized to %.1f LUFS "
+                 "(%d bytes) from web dashboard (%s) — restart to apply.",
+                 name, cfg.clip_duration_s, start_s, cfg.loudness_target_lufs,
+                 size, request.remote_addr)
         return jsonify({"ok": True, "name": name, "size_bytes": size}), 201
+
+    @app.post("/api/songs/<name>/normalize")
+    def normalize_song(name: str):
+        if not processing.ffmpeg_available():
+            return jsonify({"error": "ffmpeg is not installed on the server — "
+                                     "normalization is disabled."}), 503
+        if not _valid_song_name(name):
+            return jsonify({"error": "Invalid name."}), 400
+        target = _resolve_song(name)
+        if target is None:
+            return jsonify({"error": "No such song."}), 404
+        try:
+            processing.normalize_in_place(target, cfg.loudness_target_lufs)
+        except processing.ProcessingError as e:
+            log.error("Normalize of %s failed: %s", name, e)
+            return jsonify({"error": f"Could not normalize: {e}"}), 500
+        size = target.stat().st_size
+        # Same filename, so no restart needed: tracks are opened at play time
+        log.info("Normalized %s to %.1f LUFS (%d bytes) from web dashboard (%s).",
+                 name, cfg.loudness_target_lufs, size, request.remote_addr)
+        return jsonify({"ok": True, "name": name, "size_bytes": size})
 
     @app.delete("/api/songs/<name>")
     def delete_song(name: str):
-        # Bare filenames only — no separators, no "..", no dotfiles. Allows
-        # spaces/accents so files copied in by other means stay deletable.
-        if "/" in name or "\\" in name or ".." in name or name.startswith("."):
+        if not _valid_song_name(name):
             return jsonify({"error": "Invalid name."}), 400
-        if Path(name).suffix.lower() not in extensions:
-            return jsonify({"error": "Invalid name."}), 400
-        target = (music_folder / name).resolve()
-        if target.parent != music_folder.resolve() or not target.is_file():
+        target = _resolve_song(name)
+        if target is None:
             return jsonify({"error": "No such song."}), 404
         try:
             target.unlink()

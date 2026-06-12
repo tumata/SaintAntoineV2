@@ -68,7 +68,11 @@ class Config:
     web_host: str = "0.0.0.0"
     web_port: int = 8080
     web_auth_token: str = ""
-    upload_max_bytes: int = 5_000_000
+    # Full songs are uploaded for server-side trimming, so the cap must fit
+    # a whole track (§11.2), not just the stored clip
+    upload_max_bytes: int = 30_000_000
+    clip_duration_s: float = 10.0
+    loudness_target_lufs: float = -14.0
 
     # Webhook (empty URL = disabled)
     webhook_url: str = ""

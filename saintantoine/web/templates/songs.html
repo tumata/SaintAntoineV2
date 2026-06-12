@@ -14,6 +14,7 @@
   .wrap { max-width: 880px; margin: 0 auto; }
   header { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
   h1 { font-size: 1.4rem; margin: 0; }
+  h2 { font-size: 1.05rem; margin: 0 0 .8rem; overflow-wrap: anywhere; }
   a.nav { color: #93b4f5; text-decoration: none; font-size: .9rem; }
   a.nav:hover { text-decoration: underline; }
   .spacer { margin-left: auto; }
@@ -25,8 +26,9 @@
     font-size: 1rem; font-weight: 600; border: 0; border-radius: 10px;
     padding: .7rem 1.4rem; cursor: pointer; color: #fff;
   }
+  button:disabled { opacity: .45; cursor: default; }
   #upload-btn { background: #2563eb; }
-  #upload-btn:hover { background: #1d4ed8; }
+  #upload-btn:hover:not(:disabled) { background: #1d4ed8; }
   #restart-btn { background: #7f1d1d; }
   #restart-btn:hover { background: #991b1b; }
   ul#songs { list-style: none; margin: 0; padding: 0; }
@@ -37,8 +39,10 @@
   ul#songs li:last-child { border-bottom: 0; }
   .song-name { overflow-wrap: anywhere; }
   .song-size { color: #6b7480; font-size: .78rem; white-space: nowrap; margin-left: auto; }
+  .norm-btn { background: #374151; font-size: .8rem; padding: .35rem .8rem; }
+  .norm-btn:hover:not(:disabled) { background: #1d4ed8; }
   .delete-btn { background: #4b5563; font-size: .8rem; padding: .35rem .8rem; }
-  .delete-btn:hover { background: #b91c1c; }
+  .delete-btn:hover:not(:disabled) { background: #b91c1c; }
   #empty { color: #9aa3ad; font-style: italic; }
   #notice {
     display: none; margin-top: 1rem; padding: .8rem 1rem; border-radius: 10px;
@@ -49,7 +53,31 @@
     display: none; margin-top: 1rem; padding: .8rem 1rem; border-radius: 10px;
     background: #7f1d1d; font-weight: 600;
   }
+  #ffmpeg-warn {
+    display: none; margin-top: 1rem; padding: .8rem 1rem; border-radius: 10px;
+    background: #4c1d95; font-weight: 600;
+  }
   .meta { color: #6b7480; font-size: .78rem; margin-top: .6rem; }
+  /* ----- clip selector ----- */
+  #wave-wrap {
+    position: relative; height: 110px; border-radius: 8px; overflow: hidden;
+    background: #14171c; cursor: ew-resize; touch-action: none; user-select: none;
+  }
+  #wave { display: block; width: 100%; height: 100%; }
+  #sel-window {
+    position: absolute; top: 0; bottom: 0; pointer-events: none;
+    background: rgba(37, 99, 235, .28);
+    border-left: 2px solid #60a5fa; border-right: 2px solid #60a5fa;
+  }
+  #start-slider { width: 100%; margin: .8rem 0 .4rem; accent-color: #2563eb; }
+  .sel-row { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; margin-top: .5rem; }
+  #sel-info { font-variant-numeric: tabular-nums; }
+  #preview-btn { background: #166534; }
+  #preview-btn:hover:not(:disabled) { background: #15803d; }
+  #cancel-btn { background: #4b5563; }
+  #cancel-btn:hover:not(:disabled) { background: #6b7280; }
+  #confirm-btn { background: #2563eb; }
+  #confirm-btn:hover:not(:disabled) { background: #1d4ed8; }
 </style>
 </head>
 <body>
@@ -63,10 +91,31 @@
   </header>
 
   <div id="error"></div>
+  <div id="ffmpeg-warn">ffmpeg is not installed on the server &mdash; uploads and
+    normalization are disabled. Install it (<code>sudo apt install ffmpeg</code>)
+    and restart.</div>
 
   <div id="notice">
     <span>Changes take effect after restart.</span>
     <button id="restart-btn">&#8635;&nbsp; Restart</button>
+  </div>
+
+  <div class="card" id="selector" hidden>
+    <h2 id="sel-title"></h2>
+    <div id="wave-wrap">
+      <canvas id="wave"></canvas>
+      <div id="sel-window"></div>
+    </div>
+    <input type="range" id="start-slider" min="0" max="0" step="0.1" value="0">
+    <div class="sel-row">
+      <span id="sel-info"></span>
+      <span class="spacer"></span>
+      <button id="preview-btn">&#9654;&nbsp; Preview</button>
+      <button id="cancel-btn">Cancel</button>
+      <button id="confirm-btn">&#8682;&nbsp; Upload clip</button>
+    </div>
+    <div class="meta" id="sel-meta">Click or drag on the waveform to place the clip,
+      then preview before uploading. Volume is normalized automatically.</div>
   </div>
 
   <div class="card">
@@ -83,6 +132,8 @@
 
   let maxUploadBytes = 0;
   let acceptExts = [];
+  let clipS = 10;
+  let ffmpegOk = true;
 
   const errorEl = document.getElementById("error");
   function showError(msg) {
@@ -100,9 +151,18 @@
                               : Math.round(bytes / 1000) + " kB";
   }
 
+  function fmtTime(s) {
+    const m = Math.floor(s / 60);
+    return m + ":" + (s - m * 60).toFixed(1).padStart(4, "0");
+  }
+
   function render(data) {
     maxUploadBytes = data.max_upload_bytes;
     acceptExts = data.extensions;
+    clipS = data.clip_duration_s;
+    ffmpegOk = data.ffmpeg_available;
+    document.getElementById("ffmpeg-warn").style.display = ffmpegOk ? "none" : "block";
+    document.getElementById("upload-btn").disabled = !ffmpegOk;
     document.getElementById("file-input").accept = acceptExts.join(",");
     const ul = document.getElementById("songs");
     ul.innerHTML = "";
@@ -114,16 +174,25 @@
       const size = document.createElement("span");
       size.className = "song-size";
       size.textContent = fmtSize(s.size_bytes);
+      li.append(name, size);
+      if (ffmpegOk) {
+        const norm = document.createElement("button");
+        norm.className = "norm-btn";
+        norm.textContent = "Normalize";
+        norm.addEventListener("click", () => normalizeSong(s.name, li, norm));
+        li.append(norm);
+      }
       const del = document.createElement("button");
       del.className = "delete-btn";
       del.textContent = "Delete";
       del.addEventListener("click", () => deleteSong(s.name, data.songs.length));
-      li.append(name, size, del);
+      li.append(del);
       ul.appendChild(li);
     }
     document.getElementById("empty").hidden = data.songs.length > 0;
     document.getElementById("meta").textContent =
-      data.songs.length + " song(s) — uploads capped at " + fmtSize(maxUploadBytes);
+      data.songs.length + " song(s) — uploads are cut to " + clipS +
+      " s clips and normalized; full file capped at " + fmtSize(maxUploadBytes);
   }
 
   function refresh() {
@@ -145,6 +214,185 @@
       .catch(e => showError(e.message));
   }
 
+  function normalizeSong(name, li, btn) {
+    clearError();
+    for (const b of li.querySelectorAll("button")) b.disabled = true;
+    btn.textContent = "Normalizing…";
+    fetch("/api/songs/" + encodeURIComponent(name) + "/normalize" + qs, { method: "POST" })
+      .then(r => r.json().then(d => {
+        if (!r.ok) throw new Error(d.error || "Normalize failed.");
+        refresh();  // same filename: takes effect on the next play, no restart
+      }))
+      .catch(e => { showError(e.message); refresh(); });
+  }
+
+  // ------------------------------------------------------- clip selector ---
+  const selectorEl = document.getElementById("selector");
+  const waveWrap = document.getElementById("wave-wrap");
+  const waveCanvas = document.getElementById("wave");
+  const windowEl = document.getElementById("sel-window");
+  const slider = document.getElementById("start-slider");
+  const selInfo = document.getElementById("sel-info");
+  const previewBtn = document.getElementById("preview-btn");
+  const cancelBtn = document.getElementById("cancel-btn");
+  const confirmBtn = document.getElementById("confirm-btn");
+
+  let sel = null;  // {file, url, audio, duration, start, peaks}
+
+  function openSelector(file) {
+    closeSelector();
+    const url = URL.createObjectURL(file);
+    sel = { file, url, audio: new Audio(url), duration: 0, start: 0, peaks: null };
+    sel.audio.addEventListener("timeupdate", () => {
+      if (sel && !sel.audio.paused && sel.audio.currentTime >= sel.start + clipS) stopPreview();
+    });
+    sel.audio.addEventListener("ended", stopPreview);
+    document.getElementById("sel-title").textContent = file.name;
+    selectorEl.hidden = false;
+    selectorEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    // Duration from the audio element (fast), waveform from a full decode (slower)
+    sel.audio.addEventListener("loadedmetadata", () => {
+      if (sel && sel.audio.duration && isFinite(sel.audio.duration) && !sel.duration)
+        setDuration(sel.audio.duration);
+    });
+    decodeWaveform(file);
+    updateSelector();
+  }
+
+  function closeSelector() {
+    if (!sel) return;
+    stopPreview();
+    URL.revokeObjectURL(sel.url);
+    sel = null;
+    selectorEl.hidden = true;
+    confirmBtn.textContent = "⇪  Upload clip";
+    for (const b of [previewBtn, cancelBtn, confirmBtn]) b.disabled = false;
+  }
+
+  function setDuration(d) {
+    sel.duration = d;
+    slider.max = Math.max(0, d - clipS).toFixed(1);
+    setStart(Math.min(sel.start, +slider.max));
+  }
+
+  function setStart(s) {
+    sel.start = Math.min(Math.max(0, s), Math.max(0, sel.duration - clipS));
+    updateSelector();
+  }
+
+  function updateSelector() {
+    slider.value = sel.start;
+    if (!sel.duration) {
+      selInfo.textContent = "Loading…";
+      windowEl.style.left = "0"; windowEl.style.width = "0";
+      return;
+    }
+    const end = Math.min(sel.start + clipS, sel.duration);
+    selInfo.textContent = sel.duration <= clipS
+      ? "Whole song (" + fmtTime(sel.duration) + " ≤ " + clipS + " s)"
+      : fmtTime(sel.start) + " → " + fmtTime(end) + "  of  " + fmtTime(sel.duration);
+    windowEl.style.left = (sel.start / sel.duration * 100) + "%";
+    windowEl.style.width = ((end - sel.start) / sel.duration * 100) + "%";
+  }
+
+  async function decodeWaveform(file) {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      const ctx = new Ctx();
+      const buf = await ctx.decodeAudioData(await file.arrayBuffer());
+      ctx.close();
+      if (!sel || sel.file !== file) return;  // selector closed/replaced meanwhile
+      setDuration(buf.duration);
+      const data = buf.getChannelData(0);
+      const n = 600, bucket = Math.floor(data.length / n) || 1;
+      const step = Math.max(1, Math.floor(bucket / 50));
+      sel.peaks = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        let peak = 0;
+        for (let j = i * bucket; j < (i + 1) * bucket && j < data.length; j += step) {
+          const v = Math.abs(data[j]);
+          if (v > peak) peak = v;
+        }
+        sel.peaks[i] = peak;
+      }
+      drawWave();
+    } catch (e) {
+      // Codec not decodable in this browser — slider-only selection still works
+      drawWave();
+    }
+  }
+
+  function drawWave() {
+    const w = waveWrap.clientWidth, h = waveWrap.clientHeight;
+    waveCanvas.width = w * devicePixelRatio;
+    waveCanvas.height = h * devicePixelRatio;
+    const g = waveCanvas.getContext("2d");
+    g.scale(devicePixelRatio, devicePixelRatio);
+    g.clearRect(0, 0, w, h);
+    if (!sel || !sel.peaks) return;
+    g.fillStyle = "#3b82f6";
+    const n = sel.peaks.length, bw = w / n;
+    for (let i = 0; i < n; i++) {
+      const bh = Math.max(1, sel.peaks[i] * (h - 6));
+      g.fillRect(i * bw, (h - bh) / 2, Math.max(1, bw - 1), bh);
+    }
+  }
+
+  function pointerStart(e) {
+    if (!sel || !sel.duration) return;
+    const frac = (e.clientX - waveWrap.getBoundingClientRect().left) / waveWrap.clientWidth;
+    setStart(frac * sel.duration - clipS / 2);  // center the window on the pointer
+  }
+  waveWrap.addEventListener("pointerdown", e => {
+    waveWrap.setPointerCapture(e.pointerId);
+    pointerStart(e);
+  });
+  waveWrap.addEventListener("pointermove", e => {
+    if (e.buttons) pointerStart(e);
+  });
+  slider.addEventListener("input", () => { if (sel) setStart(+slider.value); });
+  window.addEventListener("resize", drawWave);
+
+  function stopPreview() {
+    if (!sel) return;
+    sel.audio.pause();
+    previewBtn.innerHTML = "&#9654;&nbsp; Preview";
+  }
+
+  previewBtn.addEventListener("click", () => {
+    if (!sel) return;
+    if (!sel.audio.paused) { stopPreview(); return; }
+    sel.audio.currentTime = sel.start;
+    sel.audio.play().then(() => { previewBtn.innerHTML = "&#9632;&nbsp; Stop"; })
+      .catch(() => showError("This browser cannot play the file — upload it anyway, " +
+                             "the server decodes it with ffmpeg."));
+  });
+
+  cancelBtn.addEventListener("click", closeSelector);
+
+  confirmBtn.addEventListener("click", () => {
+    if (!sel) return;
+    stopPreview();
+    clearError();
+    for (const b of [previewBtn, cancelBtn, confirmBtn]) b.disabled = true;
+    confirmBtn.textContent = "Processing…";
+    const form = new FormData();
+    form.append("file", sel.file);
+    form.append("start_s", sel.start.toFixed(2));
+    fetch("/api/songs" + qs, { method: "POST", body: form })
+      .then(r => r.json().then(d => {
+        if (!r.ok) throw new Error(d.error || "Upload failed.");
+        closeSelector();
+        markDirty();
+        refresh();
+      }))
+      .catch(e => {
+        showError(e.message);
+        confirmBtn.textContent = "⇪  Upload clip";
+        for (const b of [previewBtn, cancelBtn, confirmBtn]) b.disabled = false;
+      });
+  });
+
   const fileInput = document.getElementById("file-input");
   document.getElementById("upload-btn").addEventListener("click", () => fileInput.click());
   fileInput.addEventListener("change", () => {
@@ -157,15 +405,7 @@
                 " — over the " + fmtSize(maxUploadBytes) + " limit.");
       return;
     }
-    const form = new FormData();
-    form.append("file", file);
-    fetch("/api/songs" + qs, { method: "POST", body: form })
-      .then(r => r.json().then(d => {
-        if (!r.ok) throw new Error(d.error || "Upload failed.");
-        markDirty();
-        refresh();
-      }))
-      .catch(e => showError(e.message));
+    openSelector(file);
   });
 
   document.getElementById("restart-btn").addEventListener("click", () => {

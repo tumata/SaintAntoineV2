@@ -14,6 +14,7 @@ Full requirements: [SPECS.md](SPECS.md).
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .[dev]
 pip install pygame-ce          # real local audio (use pygame-ce: plain pygame has no wheels yet for Python 3.13+)
+brew install ffmpeg            # song upload trimming + loudness normalization (SPECS §11.2)
 cp config.example.yaml config.yaml   # optional — defaults work out of the box
 
 # Drop a few sample songs into MockMusics/ (mp3/wav/ogg/flac), then:
@@ -23,6 +24,12 @@ python -m saintantoine --mock
 Open http://localhost:8080 — click **Press button** to fake a press, watch the
 relay lamps and live logs. If `pygame` is installed locally, mock mode plays
 the MockMusics tracks audibly; otherwise playback is simulated (~10 s per track).
+
+On the **Songs** page, uploading opens a waveform selector: pick the 10-second
+section to keep, preview it, upload — the server (ffmpeg) trims it and
+normalizes loudness to -14 LUFS so every song plays at the same volume. A
+**Normalize** button on each existing song fixes quiet files in place, no
+restart needed (SPECS §11.2).
 
 The dashboard **Restart** button exits the process (clean: relays OFF). Under
 systemd it respawns automatically; locally use the loop runner so it does too:
@@ -45,7 +52,7 @@ needed (tests create their own temp tracks).
 ```bash
 # On the Pi, as user pi:
 cd /home/pi && git clone <this-repo> SaintAntoineV2 && cd SaintAntoineV2
-sudo apt install python3-pygame python3-gpiozero python3-flask python3-yaml  # or pip install .[pi]
+sudo apt install python3-pygame python3-gpiozero python3-flask python3-yaml ffmpeg  # or pip install .[pi] (ffmpeg still via apt)
 cp config.example.yaml config.yaml    # adjust if wiring/paths differ
 
 # Music goes in /home/pi/musique (configurable: music_folder)
