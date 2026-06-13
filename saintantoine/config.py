@@ -71,7 +71,11 @@ class Config:
     # Full songs are uploaded for server-side trimming, so the cap must fit
     # a whole track (§11.2), not just the stored clip
     upload_max_bytes: int = 30_000_000
+    # Per-upload clip length is chosen in the dashboard within [clip_min_s,
+    # clip_max_s]; clip_duration_s is the default the selector opens at (§11.2)
     clip_duration_s: float = 10.0
+    clip_min_s: float = 10.0
+    clip_max_s: float = 30.0
     loudness_target_lufs: float = -14.0
 
     # Webhook (empty URL = disabled)
@@ -135,6 +139,12 @@ def load_config(path: Optional[str] = None) -> Config:
         raise ValueError(f"on_audio_fault must be 'idle' or 'resume', got {cfg.on_audio_fault!r}")
     if cfg.mode not in ("auto", "real", "mock"):
         raise ValueError(f"mode must be 'auto', 'real' or 'mock', got {cfg.mode!r}")
+    if not 0 < cfg.clip_min_s <= cfg.clip_max_s:
+        raise ValueError(f"clip bounds must satisfy 0 < clip_min_s <= clip_max_s, "
+                         f"got clip_min_s={cfg.clip_min_s}, clip_max_s={cfg.clip_max_s}")
+    if not cfg.clip_min_s <= cfg.clip_duration_s <= cfg.clip_max_s:
+        raise ValueError(f"clip_duration_s must be within [clip_min_s, clip_max_s], "
+                         f"got clip_duration_s={cfg.clip_duration_s}")
     if len(cfg.relay_pins) != 3:
         log.warning("Expected 3 relay pins, got %d: %s", len(cfg.relay_pins), cfg.relay_pins)
     return cfg

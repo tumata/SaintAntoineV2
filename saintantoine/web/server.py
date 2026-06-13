@@ -105,6 +105,8 @@ def create_app(
             "extensions": sorted(extensions),
             "max_upload_bytes": cfg.upload_max_bytes,
             "clip_duration_s": cfg.clip_duration_s,
+            "clip_min_s": cfg.clip_min_s,
+            "clip_max_s": cfg.clip_max_s,
             "ffmpeg_available": processing.ffmpeg_available(),
             "free_bytes": free_bytes,
         })
@@ -123,6 +125,18 @@ def create_app(
             return jsonify({"error": "Missing or invalid start_s."}), 400
         if not start_s >= 0:  # also rejects NaN
             return jsonify({"error": "Missing or invalid start_s."}), 400
+        # Clip length is chosen per upload; default to clip_duration_s when the
+        # client omits it, reject garbage, then clamp to the configured window.
+        if "duration_s" in request.form:
+            try:
+                duration_s = float(request.form["duration_s"])
+            except ValueError:
+                return jsonify({"error": "Invalid duration_s."}), 400
+            if not duration_s > 0:  # also rejects NaN
+                return jsonify({"error": "Invalid duration_s."}), 400
+            duration_s = min(max(duration_s, cfg.clip_min_s), cfg.clip_max_s)
+        else:
+            duration_s = cfg.clip_duration_s
         name = secure_filename(f.filename)
         if not name or Path(name).suffix.lower() not in extensions:
             return jsonify({"error": "Only %s files are accepted."
@@ -140,7 +154,7 @@ def create_app(
         try:
             f.save(raw)
             processing.process_clip(raw, dest, start_s=start_s,
-                                    clip_s=cfg.clip_duration_s,
+                                    clip_s=duration_s,
                                     target_lufs=cfg.loudness_target_lufs)
             size = dest.stat().st_size
         except processing.ProcessingError as e:
@@ -153,7 +167,7 @@ def create_app(
             raw.unlink(missing_ok=True)
         log.info("Uploaded %s: %.0f s clip from %.1f s, normalized to %.1f LUFS "
                  "(%d bytes) from web dashboard (%s) — restart to apply.",
-                 name, cfg.clip_duration_s, start_s, cfg.loudness_target_lufs,
+                 name, duration_s, start_s, cfg.loudness_target_lufs,
                  size, request.remote_addr)
         return jsonify({"ok": True, "name": name, "size_bytes": size}), 201
 

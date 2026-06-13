@@ -69,7 +69,26 @@
     background: rgba(37, 99, 235, .28);
     border-left: 2px solid #60a5fa; border-right: 2px solid #60a5fa;
   }
-  #start-slider { width: 100%; margin: .8rem 0 .4rem; accent-color: #2563eb; }
+  /* Live playback cursor, shown only while previewing. */
+  #playhead {
+    position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px;
+    background: #fde047; box-shadow: 0 0 6px #fde047;
+    pointer-events: none; display: none;
+  }
+  /* Resize grips on the window edges (visual affordance; drag is handled on
+     the wrapper so the canvas keeps receiving pointer events). */
+  .sel-handle {
+    position: absolute; top: 0; bottom: 0; width: 8px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .sel-handle.left { left: -5px; } .sel-handle.right { right: -5px; }
+  .sel-handle::after {
+    content: ""; width: 2px; height: 28px; border-radius: 2px; background: #dbe9ff;
+  }
+  #start-slider, #len-slider { width: 100%; accent-color: #2563eb; }
+  #start-slider { margin: .8rem 0 .2rem; }
+  #len-slider { margin: .2rem 0 .4rem; }
+  .slider-label { color: #6b7480; font-size: .72rem; margin-top: .4rem; }
   .sel-row { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; margin-top: .5rem; }
   #sel-info { font-variant-numeric: tabular-nums; }
   #preview-btn { background: #166534; }
@@ -104,9 +123,16 @@
     <h2 id="sel-title"></h2>
     <div id="wave-wrap">
       <canvas id="wave"></canvas>
-      <div id="sel-window"></div>
+      <div id="playhead"></div>
+      <div id="sel-window">
+        <div class="sel-handle left"></div>
+        <div class="sel-handle right"></div>
+      </div>
     </div>
+    <div class="slider-label">Start</div>
     <input type="range" id="start-slider" min="0" max="0" step="0.1" value="0">
+    <div class="slider-label">Length</div>
+    <input type="range" id="len-slider" min="10" max="30" step="0.5" value="10">
     <div class="sel-row">
       <span id="sel-info"></span>
       <span class="spacer"></span>
@@ -114,8 +140,8 @@
       <button id="cancel-btn">Cancel</button>
       <button id="confirm-btn">&#8682;&nbsp; Upload clip</button>
     </div>
-    <div class="meta" id="sel-meta">Click or drag on the waveform to place the clip,
-      then preview before uploading. Volume is normalized automatically.</div>
+    <div class="meta" id="sel-meta">Drag on the waveform to place the clip, or drag its
+      edges to resize. Preview before uploading. Volume is normalized automatically.</div>
   </div>
 
   <div class="card">
@@ -132,7 +158,9 @@
 
   let maxUploadBytes = 0;
   let acceptExts = [];
-  let clipS = 10;
+  let clipS = 10;        // current selected clip length (mutable per upload)
+  let clipDefault = 10;  // length the selector opens at
+  let clipMin = 10, clipMax = 30;
   let ffmpegOk = true;
 
   const errorEl = document.getElementById("error");
@@ -160,7 +188,9 @@
   function render(data) {
     maxUploadBytes = data.max_upload_bytes;
     acceptExts = data.extensions;
-    clipS = data.clip_duration_s;
+    clipDefault = data.clip_duration_s;
+    clipMin = data.clip_min_s ?? data.clip_duration_s;
+    clipMax = data.clip_max_s ?? data.clip_duration_s;
     ffmpegOk = data.ffmpeg_available;
     document.getElementById("ffmpeg-warn").style.display = ffmpegOk ? "none" : "block";
     document.getElementById("upload-btn").disabled = !ffmpegOk;
@@ -192,8 +222,9 @@
     }
     document.getElementById("empty").hidden = data.songs.length > 0;
     document.getElementById("meta").textContent =
-      data.songs.length + " song(s) — uploads are cut to " + clipS +
-      " s clips and normalized; full file capped at " + fmtSize(maxUploadBytes) +
+      data.songs.length + " song(s) — uploads are cut to " +
+      (clipMin === clipMax ? clipMin + " s" : clipMin + "–" + clipMax + " s") +
+      " clips and normalized; full file capped at " + fmtSize(maxUploadBytes) +
       (data.free_bytes != null ? " · ~" + fmtSize(data.free_bytes) + " free on disk" : "");
   }
 
@@ -233,7 +264,9 @@
   const waveWrap = document.getElementById("wave-wrap");
   const waveCanvas = document.getElementById("wave");
   const windowEl = document.getElementById("sel-window");
+  const playheadEl = document.getElementById("playhead");
   const slider = document.getElementById("start-slider");
+  const lenSlider = document.getElementById("len-slider");
   const selInfo = document.getElementById("sel-info");
   const previewBtn = document.getElementById("preview-btn");
   const cancelBtn = document.getElementById("cancel-btn");
@@ -243,6 +276,10 @@
 
   function openSelector(file) {
     closeSelector();
+    clipS = Math.min(Math.max(clipDefault, clipMin), clipMax);
+    lenSlider.min = clipMin;
+    lenSlider.max = clipMax;
+    lenSlider.value = clipS;
     const url = URL.createObjectURL(file);
     sel = { file, url, audio: new Audio(url), duration: 0, start: 0, peaks: null };
     sel.audio.addEventListener("timeupdate", () => {
@@ -273,12 +310,25 @@
 
   function setDuration(d) {
     sel.duration = d;
-    slider.max = Math.max(0, d - clipS).toFixed(1);
-    setStart(Math.min(sel.start, +slider.max));
+    // The length can't exceed the song; sub-min songs are kept whole, so the
+    // length control is disabled and the window spans the whole file.
+    const lenCap = Math.max(clipMin, Math.min(clipMax, d));
+    lenSlider.max = lenCap;
+    lenSlider.disabled = d <= clipMin;
+    setLength(Math.min(clipS, lenCap));
+  }
+
+  function setLength(len) {
+    const hi = Math.max(clipMin, +lenSlider.max || clipMax);
+    clipS = Math.min(Math.max(len, clipMin), hi);
+    lenSlider.value = clipS;
+    slider.max = Math.max(0, sel.duration - clipS).toFixed(1);
+    setStart(sel.start);  // re-clamp start to the resized window
   }
 
   function setStart(s) {
     sel.start = Math.min(Math.max(0, s), Math.max(0, sel.duration - clipS));
+    slider.value = sel.start;
     updateSelector();
   }
 
@@ -292,7 +342,8 @@
     const end = Math.min(sel.start + clipS, sel.duration);
     selInfo.textContent = sel.duration <= clipS
       ? "Whole song (" + fmtTime(sel.duration) + " ≤ " + clipS + " s)"
-      : fmtTime(sel.start) + " → " + fmtTime(end) + "  of  " + fmtTime(sel.duration);
+      : fmtTime(sel.start) + " → " + fmtTime(end) + "  of  " + fmtTime(sel.duration)
+        + "  ·  " + (+clipS.toFixed(1)) + " s";
     windowEl.style.left = (sel.start / sel.duration * 100) + "%";
     windowEl.style.width = ((end - sel.start) / sel.duration * 100) + "%";
   }
@@ -340,24 +391,72 @@
     }
   }
 
-  function pointerStart(e) {
-    if (!sel || !sel.duration) return;
+  let drag = null;  // {mode: "move"|"left"|"right", grab?: seconds-from-start}
+
+  function pointerTime(e) {
     const frac = (e.clientX - waveWrap.getBoundingClientRect().left) / waveWrap.clientWidth;
-    setStart(frac * sel.duration - clipS / 2);  // center the window on the pointer
+    return Math.min(Math.max(0, frac), 1) * sel.duration;
   }
+
+  function hitTest(t) {
+    // Which part of the window a pointerdown grabs. Edges get a tolerance so
+    // they're easy to grab; whole-song clips (duration ≤ length) only move.
+    if (sel.duration <= clipS) return { mode: "move", grab: t - sel.start };
+    const end = sel.start + clipS;
+    const tol = Math.max(0.25, sel.duration * 0.03);  // seconds
+    if (Math.abs(t - sel.start) <= tol) return { mode: "left" };
+    if (Math.abs(t - end) <= tol) return { mode: "right" };
+    if (t > sel.start && t < end) return { mode: "move", grab: t - sel.start };
+    return null;  // empty track → recenter
+  }
+
+  function applyDrag(e) {
+    const t = pointerTime(e);
+    if (drag.mode === "move") {
+      setStart(t - drag.grab);
+    } else if (drag.mode === "right") {
+      setLength(t - sel.start);            // start anchored, end follows pointer
+    } else if (drag.mode === "left") {
+      const end = sel.start + clipS;       // keep the right edge anchored
+      setLength(end - t);                  // clipS may be clamped to bounds
+      setStart(end - clipS);
+    }
+  }
+
   waveWrap.addEventListener("pointerdown", e => {
+    if (!sel || !sel.duration) return;
     waveWrap.setPointerCapture(e.pointerId);
-    pointerStart(e);
+    const hit = hitTest(pointerTime(e));
+    if (hit) {
+      drag = hit;
+    } else {                               // empty track: center a move on pointer
+      setStart(pointerTime(e) - clipS / 2);
+      drag = { mode: "move", grab: clipS / 2 };
+    }
+    applyDrag(e);
   });
   waveWrap.addEventListener("pointermove", e => {
-    if (e.buttons) pointerStart(e);
+    if (sel && drag && e.buttons) applyDrag(e);
   });
+  waveWrap.addEventListener("pointerup", () => { drag = null; });
+  waveWrap.addEventListener("pointercancel", () => { drag = null; });
   slider.addEventListener("input", () => { if (sel) setStart(+slider.value); });
+  lenSlider.addEventListener("input", () => { if (sel) setLength(+lenSlider.value); });
   window.addEventListener("resize", drawWave);
+
+  let previewRaf = null;
+
+  function tickPlayhead() {
+    if (!sel || sel.audio.paused || !sel.duration) { previewRaf = null; return; }
+    playheadEl.style.left = (sel.audio.currentTime / sel.duration * 100) + "%";
+    previewRaf = requestAnimationFrame(tickPlayhead);
+  }
 
   function stopPreview() {
     if (!sel) return;
     sel.audio.pause();
+    if (previewRaf) { cancelAnimationFrame(previewRaf); previewRaf = null; }
+    playheadEl.style.display = "none";
     previewBtn.innerHTML = "&#9654;&nbsp; Preview";
   }
 
@@ -365,8 +464,11 @@
     if (!sel) return;
     if (!sel.audio.paused) { stopPreview(); return; }
     sel.audio.currentTime = sel.start;
-    sel.audio.play().then(() => { previewBtn.innerHTML = "&#9632;&nbsp; Stop"; })
-      .catch(() => showError("This browser cannot play the file — upload it anyway, " +
+    sel.audio.play().then(() => {
+      previewBtn.innerHTML = "&#9632;&nbsp; Stop";
+      playheadEl.style.display = "block";
+      if (!previewRaf) previewRaf = requestAnimationFrame(tickPlayhead);
+    }).catch(() => showError("This browser cannot play the file — upload it anyway, " +
                              "the server decodes it with ffmpeg."));
   });
 
@@ -381,6 +483,7 @@
     const form = new FormData();
     form.append("file", sel.file);
     form.append("start_s", sel.start.toFixed(2));
+    form.append("duration_s", clipS.toFixed(2));
     fetch("/api/songs" + qs, { method: "POST", body: form })
       .then(r => r.json().then(d => {
         if (!r.ok) throw new Error(d.error || "Upload failed.");

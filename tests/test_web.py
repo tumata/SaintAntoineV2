@@ -111,10 +111,12 @@ def fake_processing(monkeypatch):
     return calls
 
 
-def _upload(client, filename, data=b"\x00\x01", start_s="3.5"):
+def _upload(client, filename, data=b"\x00\x01", start_s="3.5", duration_s=None):
     payload = {"file": (io.BytesIO(data), filename)}
     if start_s is not None:
         payload["start_s"] = start_s
+    if duration_s is not None:
+        payload["duration_s"] = duration_s
     return client.post("/api/songs", data=payload,
                        content_type="multipart/form-data")
 
@@ -134,6 +136,8 @@ def test_list_songs(web):
     assert data["max_upload_bytes"] == harness.cfg.upload_max_bytes
     assert ".mp3" in data["extensions"]
     assert data["clip_duration_s"] == harness.cfg.clip_duration_s
+    assert data["clip_min_s"] == harness.cfg.clip_min_s
+    assert data["clip_max_s"] == harness.cfg.clip_max_s
     assert isinstance(data["ffmpeg_available"], bool)
     assert isinstance(data["free_bytes"], int) and data["free_bytes"] > 0
 
@@ -160,6 +164,32 @@ def test_upload_requires_valid_start(web, fake_processing):
     assert _upload(client, "a.mp3", start_s="-1").status_code == 400
     assert _upload(client, "a.mp3", start_s="nan").status_code == 400
     assert not (harness.music_folder / "a.mp3").exists()
+    assert fake_processing["clips"] == []
+
+
+def test_upload_honors_duration(web, fake_processing):
+    client, harness, _, _ = web
+    mid = (harness.cfg.clip_min_s + harness.cfg.clip_max_s) / 2
+    assert _upload(client, "a.mp3", duration_s=str(mid)).status_code == 201
+    [(_, _, _, clip, _)] = fake_processing["clips"]
+    assert clip == mid
+
+
+def test_upload_clamps_duration_to_bounds(web, fake_processing):
+    client, harness, _, _ = web
+    lo, hi = harness.cfg.clip_min_s, harness.cfg.clip_max_s
+    assert _upload(client, "low.mp3", duration_s=str(lo - 5)).status_code == 201
+    assert _upload(client, "high.mp3", duration_s=str(hi + 99)).status_code == 201
+    clips = sorted(c[3] for c in fake_processing["clips"])
+    assert clips == [lo, hi]
+
+
+def test_upload_rejects_invalid_duration(web, fake_processing):
+    client, harness, _, _ = web
+    assert _upload(client, "a.mp3", duration_s="abc").status_code == 400
+    assert _upload(client, "a.mp3", duration_s="0").status_code == 400
+    assert _upload(client, "a.mp3", duration_s="-5").status_code == 400
+    assert _upload(client, "a.mp3", duration_s="nan").status_code == 400
     assert fake_processing["clips"] == []
 
 

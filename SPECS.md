@@ -325,13 +325,15 @@ else keeps working.
 
 - **Client-side selection, server-side processing.** Picking a file opens a selector
   card *before* anything is uploaded: the browser previews the local file (Object URL)
-  and decodes it with the Web Audio API to draw a waveform; a draggable
-  `clip_duration_s` (default 10 s) window plus a slider chooses the section, with a
-  Preview button (plays the window, auto-stops). If the browser can't decode the codec,
-  the slider alone still works. On confirm, the **full file + `start_s`** are POSTed.
+  and decodes it with the Web Audio API to draw a waveform; a draggable window chooses
+  the section (drag the body to move, drag an edge to resize), with Start and Length
+  sliders alongside and a Preview button (plays the window, auto-stops). The clip length
+  is variable per upload within `[clip_min_s, clip_max_s]` (default **10–30 s**), opening
+  at `clip_duration_s`. If the browser can't decode the codec, the sliders alone still
+  work. On confirm, the **full file + `start_s` + `duration_s`** are POSTed.
 - **Server processing** (`saintantoine/processing.py`, no Flask imports):
   1. `ffprobe` the real duration; clamp `start_s` so the window fits. Songs shorter
-     than `clip_duration_s` are kept whole.
+     than the chosen clip length are kept whole.
   2. Two-pass EBU R128 `loudnorm` (pass 1 measures, pass 2 applies with
      `linear=true`): target `loudness_target_lufs` (default **-14 LUFS**), TP -1.5 dB,
      LRA 11.
@@ -348,9 +350,13 @@ else keeps working.
   unchanged and tracks are opened at play time, so this needs **no restart** (the
   dirty/restart notice only applies to uploads/deletes).
 - **Endpoint changes**: `POST /api/songs` requires form field `start_s` (float ≥ 0,
-  else 400); `GET /api/songs` additionally returns `clip_duration_s` and
+  else 400) and accepts optional `duration_s` (float > 0, else 400; clamped server-side
+  to `[clip_min_s, clip_max_s]`; defaults to `clip_duration_s` when omitted); `GET
+  /api/songs` additionally returns `clip_duration_s`, `clip_min_s`, `clip_max_s` and
   `ffmpeg_available`.
-- **Config**: `clip_duration_s` (default 10.0), `loudness_target_lufs` (default
+- **Config**: `clip_duration_s` (default 10.0, the selector's opening length),
+  `clip_min_s` / `clip_max_s` (default 10.0 / 30.0, the selectable range; validated
+  `0 < clip_min_s ≤ clip_duration_s ≤ clip_max_s`), `loudness_target_lufs` (default
   -14.0), and `upload_max_bytes` raised to **30 MB** since the full song is uploaded
   for trimming.
 
@@ -364,7 +370,7 @@ else keeps working.
   - GPIO: `button_pin`, `button_pull_up`, `relay_pins`, `relay_active_high`, `relay_initial_value`
   - Debounce: `hold_window_ms`, `sample_interval_ms`, `min_press_interval_ms`, `rapidfire_count`, `rapidfire_window_s`, `rapidfire_cooldown_s`, `gpiozero_bounce_time_s`
   - Audio: `startup_delay_s`, watchdog thresholds (`health_probe_interval_s`, `play_start_grace_s`, `max_reinit_attempts`), `on_audio_fault` policy (`idle` | `resume`)
-  - Web: `web_enabled`, `web_host` (default `0.0.0.0`), `web_port`, `web_auth_token` (optional), `upload_max_bytes` (§11.2, default 30 MB), `clip_duration_s` (§11.2, default 10 s), `loudness_target_lufs` (§11.2, default -14)
+  - Web: `web_enabled`, `web_host` (default `0.0.0.0`), `web_port`, `web_auth_token` (optional), `upload_max_bytes` (§11.2, default 30 MB), `clip_duration_s` (§11.2, default 10 s), `clip_min_s` / `clip_max_s` (§11.2, default 10 / 30 s), `loudness_target_lufs` (§11.2, default -14)
   - Webhook: `webhook_url` (empty = disabled), `webhook_timeout_s`
   - Logging: `log_file`, `log_level`, `log_ring_buffer_size`
 
