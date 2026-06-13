@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import tempfile
 import threading
 import time
@@ -94,12 +95,18 @@ def create_app(
                     songs.append({"name": p.name, "size_bytes": p.stat().st_size})
         except OSError as e:
             log.error("Cannot read music folder %s: %s", music_folder, e)
+        try:
+            free_bytes = shutil.disk_usage(music_folder).free
+        except OSError as e:
+            log.error("Cannot read disk usage for %s: %s", music_folder, e)
+            free_bytes = None
         return jsonify({
             "songs": songs,
             "extensions": sorted(extensions),
             "max_upload_bytes": cfg.upload_max_bytes,
             "clip_duration_s": cfg.clip_duration_s,
             "ffmpeg_available": processing.ffmpeg_available(),
+            "free_bytes": free_bytes,
         })
 
     @app.post("/api/songs")

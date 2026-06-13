@@ -135,6 +135,7 @@ def test_list_songs(web):
     assert ".mp3" in data["extensions"]
     assert data["clip_duration_s"] == harness.cfg.clip_duration_s
     assert isinstance(data["ffmpeg_available"], bool)
+    assert isinstance(data["free_bytes"], int) and data["free_bytes"] > 0
 
 
 def test_upload_song(web, fake_processing):
