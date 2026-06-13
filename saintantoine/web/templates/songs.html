@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Saint Antoine — Songs</title>
+<title>Saint Antoine — Chansons</title>
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-title" content="Saint Antoine">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -105,21 +105,22 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>Songs</h1>
-    <a class="nav" id="back-link" href="/">&larr; Dashboard</a>
+    <h1>Chansons</h1>
+    <a class="nav" id="home-link" href="/">&larr; Accueil</a>
+    <a class="nav" id="debug-link" href="/debug">Debug</a>
     <span class="spacer"></span>
-    <button id="upload-btn">&#8682;&nbsp; Upload song</button>
+    <button id="upload-btn">&#8682;&nbsp; Ajouter une chanson</button>
     <input type="file" id="file-input" hidden>
   </header>
 
   <div id="error"></div>
-  <div id="ffmpeg-warn">ffmpeg is not installed on the server &mdash; uploads and
-    normalization are disabled. Install it (<code>sudo apt install ffmpeg</code>)
-    and restart.</div>
+  <div id="ffmpeg-warn">ffmpeg n'est pas installé sur le serveur &mdash; les envois et la
+    normalisation sont désactivés. Installez-le (<code>sudo apt install ffmpeg</code>)
+    puis redémarrez.</div>
 
   <div id="notice">
-    <span>Changes take effect after restart.</span>
-    <button id="restart-btn">&#8635;&nbsp; Restart</button>
+    <span>Les changements prennent effet après redémarrage.</span>
+    <button id="restart-btn">&#8635;&nbsp; Redémarrer</button>
   </div>
 
   <div class="card" id="selector" hidden>
@@ -132,24 +133,25 @@
         <div class="sel-handle right"></div>
       </div>
     </div>
-    <div class="slider-label">Start</div>
+    <div class="slider-label">Début</div>
     <input type="range" id="start-slider" min="0" max="0" step="0.1" value="0">
-    <div class="slider-label">Length</div>
+    <div class="slider-label">Durée</div>
     <input type="range" id="len-slider" min="10" max="30" step="0.5" value="10">
     <div class="sel-row">
       <span id="sel-info"></span>
       <span class="spacer"></span>
-      <button id="preview-btn">&#9654;&nbsp; Preview</button>
-      <button id="cancel-btn">Cancel</button>
-      <button id="confirm-btn">&#8682;&nbsp; Upload clip</button>
+      <button id="preview-btn">&#9654;&nbsp; Aperçu</button>
+      <button id="cancel-btn">Annuler</button>
+      <button id="confirm-btn">&#8682;&nbsp; Envoyer l'extrait</button>
     </div>
-    <div class="meta" id="sel-meta">Drag on the waveform to place the clip, or drag its
-      edges to resize. Preview before uploading. Volume is normalized automatically.</div>
+    <div class="meta" id="sel-meta">Glissez sur la forme d'onde pour placer l'extrait, ou
+      glissez ses bords pour le redimensionner. Écoutez avant d'envoyer. Le volume est
+      normalisé automatiquement.</div>
   </div>
 
   <div class="card">
     <ul id="songs"></ul>
-    <div id="empty" hidden>No songs — upload one, or presses will be ignored.</div>
+    <div id="empty" hidden>Aucune chanson — ajoutez-en une, sinon les appuis seront ignorés.</div>
     <div class="meta" id="meta"></div>
   </div>
 </div>
@@ -157,7 +159,8 @@
 <script>
   const token = new URLSearchParams(location.search).get("token");
   const qs = token ? "?token=" + encodeURIComponent(token) : "";
-  document.getElementById("back-link").href = "/" + qs;
+  document.getElementById("home-link").href = "/" + qs;
+  document.getElementById("debug-link").href = "/debug" + qs;
 
   let maxUploadBytes = 0;
   let acceptExts = [];
@@ -178,9 +181,9 @@
   }
 
   function fmtSize(bytes) {
-    if (bytes >= 1_000_000_000) return (bytes / 1_000_000_000).toFixed(1) + " GB";
-    return bytes >= 1_000_000 ? (bytes / 1_000_000).toFixed(1) + " MB"
-                              : Math.round(bytes / 1000) + " kB";
+    if (bytes >= 1_000_000_000) return (bytes / 1_000_000_000).toFixed(1) + " Go";
+    return bytes >= 1_000_000 ? (bytes / 1_000_000).toFixed(1) + " Mo"
+                              : Math.round(bytes / 1000) + " ko";
   }
 
   function fmtTime(s) {
@@ -212,38 +215,38 @@
       if (ffmpegOk) {
         const norm = document.createElement("button");
         norm.className = "norm-btn";
-        norm.textContent = "Normalize";
+        norm.textContent = "Normaliser";
         norm.addEventListener("click", () => normalizeSong(s.name, li, norm));
         li.append(norm);
       }
       const del = document.createElement("button");
       del.className = "delete-btn";
-      del.textContent = "Delete";
+      del.textContent = "Supprimer";
       del.addEventListener("click", () => deleteSong(s.name, data.songs.length));
       li.append(del);
       ul.appendChild(li);
     }
     document.getElementById("empty").hidden = data.songs.length > 0;
     document.getElementById("meta").textContent =
-      data.songs.length + " song(s) — uploads are cut to " +
+      data.songs.length + " chanson(s) — les envois sont découpés en extraits de " +
       (clipMin === clipMax ? clipMin + " s" : clipMin + "–" + clipMax + " s") +
-      " clips and normalized; full file capped at " + fmtSize(maxUploadBytes) +
-      (data.free_bytes != null ? " · ~" + fmtSize(data.free_bytes) + " free on disk" : "");
+      " et normalisés ; fichier complet limité à " + fmtSize(maxUploadBytes) +
+      (data.free_bytes != null ? " · ~" + fmtSize(data.free_bytes) + " libres sur le disque" : "");
   }
 
   function refresh() {
     fetch("/api/songs" + qs).then(r => r.json()).then(render)
-      .catch(() => showError("Could not load the song list."));
+      .catch(() => showError("Impossible de charger la liste des chansons."));
   }
 
   function deleteSong(name, total) {
-    let msg = "Delete \"" + name + "\"?";
-    if (total <= 1) msg += "\n\nThis is the last song — after restart, presses will be ignored.";
+    let msg = "Supprimer « " + name + " » ?";
+    if (total <= 1) msg += "\n\nC'est la dernière chanson — après redémarrage, les appuis seront ignorés.";
     if (!confirm(msg)) return;
     clearError();
     fetch("/api/songs/" + encodeURIComponent(name) + qs, { method: "DELETE" })
       .then(r => r.json().then(d => {
-        if (!r.ok) throw new Error(d.error || "Delete failed.");
+        if (!r.ok) throw new Error(d.error || "Échec de la suppression.");
         markDirty();
         refresh();
       }))
@@ -253,10 +256,10 @@
   function normalizeSong(name, li, btn) {
     clearError();
     for (const b of li.querySelectorAll("button")) b.disabled = true;
-    btn.textContent = "Normalizing…";
+    btn.textContent = "Normalisation…";
     fetch("/api/songs/" + encodeURIComponent(name) + "/normalize" + qs, { method: "POST" })
       .then(r => r.json().then(d => {
-        if (!r.ok) throw new Error(d.error || "Normalize failed.");
+        if (!r.ok) throw new Error(d.error || "Échec de la normalisation.");
         refresh();  // same filename: takes effect on the next play, no restart
       }))
       .catch(e => { showError(e.message); refresh(); });
@@ -307,7 +310,7 @@
     URL.revokeObjectURL(sel.url);
     sel = null;
     selectorEl.hidden = true;
-    confirmBtn.textContent = "⇪  Upload clip";
+    confirmBtn.textContent = "⇪  Envoyer l'extrait";
     for (const b of [previewBtn, cancelBtn, confirmBtn]) b.disabled = false;
   }
 
@@ -338,14 +341,14 @@
   function updateSelector() {
     slider.value = sel.start;
     if (!sel.duration) {
-      selInfo.textContent = "Loading…";
+      selInfo.textContent = "Chargement…";
       windowEl.style.left = "0"; windowEl.style.width = "0";
       return;
     }
     const end = Math.min(sel.start + clipS, sel.duration);
     selInfo.textContent = sel.duration <= clipS
-      ? "Whole song (" + fmtTime(sel.duration) + " ≤ " + clipS + " s)"
-      : fmtTime(sel.start) + " → " + fmtTime(end) + "  of  " + fmtTime(sel.duration)
+      ? "Chanson entière (" + fmtTime(sel.duration) + " ≤ " + clipS + " s)"
+      : fmtTime(sel.start) + " → " + fmtTime(end) + "  sur  " + fmtTime(sel.duration)
         + "  ·  " + (+clipS.toFixed(1)) + " s";
     windowEl.style.left = (sel.start / sel.duration * 100) + "%";
     windowEl.style.width = ((end - sel.start) / sel.duration * 100) + "%";
@@ -460,7 +463,7 @@
     sel.audio.pause();
     if (previewRaf) { cancelAnimationFrame(previewRaf); previewRaf = null; }
     playheadEl.style.display = "none";
-    previewBtn.innerHTML = "&#9654;&nbsp; Preview";
+    previewBtn.innerHTML = "&#9654;&nbsp; Aperçu";
   }
 
   previewBtn.addEventListener("click", () => {
@@ -468,11 +471,11 @@
     if (!sel.audio.paused) { stopPreview(); return; }
     sel.audio.currentTime = sel.start;
     sel.audio.play().then(() => {
-      previewBtn.innerHTML = "&#9632;&nbsp; Stop";
+      previewBtn.innerHTML = "&#9632;&nbsp; Arrêter";
       playheadEl.style.display = "block";
       if (!previewRaf) previewRaf = requestAnimationFrame(tickPlayhead);
-    }).catch(() => showError("This browser cannot play the file — upload it anyway, " +
-                             "the server decodes it with ffmpeg."));
+    }).catch(() => showError("Ce navigateur ne peut pas lire le fichier — envoyez-le quand " +
+                             "même, le serveur le décode avec ffmpeg."));
   });
 
   cancelBtn.addEventListener("click", closeSelector);
@@ -482,21 +485,21 @@
     stopPreview();
     clearError();
     for (const b of [previewBtn, cancelBtn, confirmBtn]) b.disabled = true;
-    confirmBtn.textContent = "Processing…";
+    confirmBtn.textContent = "Traitement…";
     const form = new FormData();
     form.append("file", sel.file);
     form.append("start_s", sel.start.toFixed(2));
     form.append("duration_s", clipS.toFixed(2));
     fetch("/api/songs" + qs, { method: "POST", body: form })
       .then(r => r.json().then(d => {
-        if (!r.ok) throw new Error(d.error || "Upload failed.");
+        if (!r.ok) throw new Error(d.error || "Échec de l'envoi.");
         closeSelector();
         markDirty();
         refresh();
       }))
       .catch(e => {
         showError(e.message);
-        confirmBtn.textContent = "⇪  Upload clip";
+        confirmBtn.textContent = "⇪  Envoyer l'extrait";
         for (const b of [previewBtn, cancelBtn, confirmBtn]) b.disabled = false;
       });
   });
@@ -509,17 +512,17 @@
     if (!file) return;
     clearError();
     if (maxUploadBytes && file.size > maxUploadBytes) {
-      showError("\"" + file.name + "\" is " + fmtSize(file.size) +
-                " — over the " + fmtSize(maxUploadBytes) + " limit.");
+      showError("« " + file.name + " » fait " + fmtSize(file.size) +
+                " — au-delà de la limite de " + fmtSize(maxUploadBytes) + ".");
       return;
     }
     openSelector(file);
   });
 
   document.getElementById("restart-btn").addEventListener("click", () => {
-    if (!confirm("Restart the whole program? Music stops and relays turn off.")) return;
+    if (!confirm("Redémarrer tout le programme ? La musique s'arrête et les relais se coupent.")) return;
     document.getElementById("notice").firstElementChild.textContent =
-      "Restarting — refresh the page in a few seconds.";
+      "Redémarrage — actualisez la page dans quelques secondes.";
     fetch("/restart" + qs, { method: "POST" }).catch(() => {});
   });
 

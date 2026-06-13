@@ -23,6 +23,7 @@ ENV_PREFIX = "SAINTANTOINE_"
 
 DEFAULT_PI_MUSIC_FOLDER = "/home/pi/musique"
 DEFAULT_PI_LOG_FILE = "/home/pi/saintantoine/log_script.txt"
+DEFAULT_PI_ANALYTICS_DB = "/home/pi/saintantoine/analytics.db"
 
 
 @dataclass
@@ -77,6 +78,11 @@ class Config:
     clip_min_s: float = 10.0
     clip_max_s: float = 30.0
     loudness_target_lufs: float = -14.0
+
+    # Analytics (SPECS §11.4): SQLite event store behind the analytics dashboard
+    analytics_enabled: bool = True
+    analytics_db_path: str = DEFAULT_PI_ANALYTICS_DB
+    analytics_top_n: int = 10
 
     # Webhook (empty URL = disabled)
     webhook_url: str = ""
@@ -177,3 +183,10 @@ def resolve_log_file(cfg: Config, mode: str) -> Path:
     if mode == "mock" and cfg.log_file == DEFAULT_PI_LOG_FILE:
         return PROJECT_ROOT / "saintantoine.log"
     return Path(cfg.log_file)
+
+
+def resolve_analytics_db(cfg: Config, mode: str) -> Path:
+    """In mock mode, swap the default Pi DB path for one inside the project."""
+    if mode == "mock" and cfg.analytics_db_path == DEFAULT_PI_ANALYTICS_DB:
+        return PROJECT_ROOT / "analytics.db"
+    return Path(cfg.analytics_db_path)

@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Saint Antoine — Statistiques</title>
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="Saint Antoine">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<script src="/static/chart.min.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 1.5rem; background: #14171c; color: #e6e8eb;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  header { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+  h1 { font-size: 1.4rem; margin: 0; }
+  h2 { font-size: 1.05rem; margin: 0 0 .2rem; }
+  .badge {
+    font-size: .72rem; font-weight: 700; letter-spacing: .06em; padding: .2rem .55rem;
+    border-radius: 999px; text-transform: uppercase;
+  }
+  .badge.ok  { background: #166534; }
+  .badge.bad { background: #b91c1c; }
+  .badge.off { background: #4b5563; }
+  a.nav { color: #93b4f5; text-decoration: none; font-size: .9rem; }
+  a.nav:hover { text-decoration: underline; }
+  .spacer { margin-left: auto; }
+  .card {
+    background: #1c2027; border: 1px solid #2a3038; border-radius: 12px;
+    padding: 1.1rem 1.25rem; margin-top: 1rem;
+  }
+  .sub { color: #6b7480; font-size: .8rem; margin: 0 0 .8rem; }
+  .chart-box { position: relative; height: 260px; }
+  #summary {
+    display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: baseline;
+    margin-top: 1rem; color: #c8d0d9;
+  }
+  #summary .big { font-size: 1.6rem; font-weight: 800; color: #e6e8eb; }
+  #summary .lbl { font-size: .78rem; color: #6b7480; }
+  #record { color: #fbbf24; font-weight: 600; margin-top: .4rem; }
+  #empty, #error { display: none; color: #9aa3ad; font-style: italic; }
+  #error { color: #fca5a5; font-style: normal; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Statistiques</h1>
+    <span id="conn-badge" class="badge off">connexion</span>
+    <span class="spacer"></span>
+    <a class="nav" id="debug-link" href="/debug">Debug</a>
+    <a class="nav" id="songs-link" href="/songs">Chansons &rarr;</a>
+  </header>
+
+  <div id="error" class="card"></div>
+
+  <div class="card">
+    <div id="summary">
+      <div><div class="big" id="total-plays">—</div><div class="lbl">lectures</div></div>
+      <div><div class="big" id="total-completions">—</div><div class="lbl">écoutes complètes</div></div>
+    </div>
+    <div id="record"></div>
+    <div id="empty">Aucune donnée pour l'instant — appuyez sur le bouton&nbsp;!</div>
+  </div>
+
+  <div class="card">
+    <h2>Heures d'écoute</h2>
+    <p class="sub">À quelles heures de la journée la musique est lancée.</p>
+    <div class="chart-box"><canvas id="hour-chart"></canvas></div>
+  </div>
+
+  <div class="card">
+    <h2>Chansons favorites</h2>
+    <p class="sub">Morceaux écoutés jusqu'au bout, du plus joué au moins joué.</p>
+    <div class="chart-box"><canvas id="track-chart"></canvas></div>
+  </div>
+
+  <div class="card">
+    <h2>Activité par jour</h2>
+    <p class="sub">Nombre de lectures par jour (un appui = une lecture).</p>
+    <div class="chart-box"><canvas id="day-chart"></canvas></div>
+  </div>
+</div>
+
+<script>
+  const token = new URLSearchParams(location.search).get("token");
+  const qs = token ? "?token=" + encodeURIComponent(token) : "";
+  document.getElementById("debug-link").href = "/debug" + qs;
+  document.getElementById("songs-link").href = "/songs" + qs;
+
+  Chart.defaults.color = "#9aa3ad";
+  Chart.defaults.borderColor = "#2a3038";
+  Chart.defaults.font.family = "-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+
+  const BLUE = "#3b82f6", GREEN = "#22c55e";
+
+  function frDate(iso) {
+    if (!iso) return "";
+    const [y, m, d] = iso.split("-").map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString("fr-FR",
+      { day: "numeric", month: "long", year: "numeric" });
+  }
+
+  const noLegend = { plugins: { legend: { display: false } } };
+  const intAxis = { ticks: { precision: 0 } };
+
+  const hourChart = new Chart(document.getElementById("hour-chart"), {
+    type: "bar",
+    data: { labels: [], datasets: [{ data: [], backgroundColor: BLUE, borderRadius: 4 }] },
+    options: {
+      maintainAspectRatio: false, ...noLegend,
+      scales: { y: { beginAtZero: true, ...intAxis } },
+    },
+  });
+
+  const trackChart = new Chart(document.getElementById("track-chart"), {
+    type: "bar",
+    data: { labels: [], datasets: [{ data: [], backgroundColor: BLUE, borderRadius: 4 }] },
+    options: {
+      indexAxis: "y", maintainAspectRatio: false, ...noLegend,
+      scales: { x: { beginAtZero: true, ...intAxis } },
+    },
+  });
+
+  const dayChart = new Chart(document.getElementById("day-chart"), {
+    type: "bar",
+    data: { labels: [], datasets: [{ data: [], backgroundColor: [], borderRadius: 4 }] },
+    options: {
+      maintainAspectRatio: false, ...noLegend,
+      scales: { y: { beginAtZero: true, ...intAxis } },
+    },
+  });
+
+  function showError(on) {
+    const el = document.getElementById("error");
+    el.textContent = "Impossible de charger les statistiques.";
+    el.style.display = on ? "block" : "none";
+  }
+
+  function render(data) {
+    showError(false);
+    if (data.enabled === false) {
+      document.getElementById("error").textContent = "Statistiques désactivées dans la configuration.";
+      document.getElementById("error").style.display = "block";
+    }
+    document.getElementById("total-plays").textContent = data.total_plays ?? 0;
+    document.getElementById("total-completions").textContent = data.total_completions ?? 0;
+
+    const noData = (data.total_plays ?? 0) === 0 && (data.total_completions ?? 0) === 0;
+    document.getElementById("empty").style.display = noData ? "block" : "none";
+
+    const rec = document.getElementById("record");
+    rec.textContent = data.peak_day
+      ? "Record : " + data.peak_day.count + " lecture(s) le " + frDate(data.peak_day.day)
+      : "";
+
+    // Graphe 1 — heures
+    hourChart.data.labels = (data.by_hour || []).map(h => h.hour + " h");
+    hourChart.data.datasets[0].data = (data.by_hour || []).map(h => h.count);
+    hourChart.update();
+
+    // Graphe 2 — favorites
+    trackChart.data.labels = (data.top_tracks || []).map(t => t.name);
+    trackChart.data.datasets[0].data = (data.top_tracks || []).map(t => t.count);
+    trackChart.update();
+
+    // Graphe 3 — par jour, jour record en vert
+    const days = data.by_day || [];
+    const peak = data.peak_day ? data.peak_day.day : null;
+    dayChart.data.labels = days.map(d => frDate(d.day));
+    dayChart.data.datasets[0].data = days.map(d => d.count);
+    dayChart.data.datasets[0].backgroundColor = days.map(d => d.day === peak ? GREEN : BLUE);
+    dayChart.update();
+  }
+
+  function fetchAnalytics() {
+    fetch("/api/analytics" + qs).then(r => r.json()).then(render)
+      .catch(() => showError(true));
+  }
+
+  fetchAnalytics();
+
+  // Dynamic: the SSE status stream carries an analytics revision counter that bumps
+  // on every play-start / natural completion. Refetch only when it changes.
+  let seenRev = null;
+  const es = new EventSource("/events" + qs);
+  es.addEventListener("status", e => {
+    document.getElementById("conn-badge").textContent = "en direct";
+    document.getElementById("conn-badge").className = "badge ok";
+    let rev;
+    try { rev = JSON.parse(e.data).analytics_rev; } catch (_) { return; }
+    if (seenRev === null) { seenRev = rev; return; }
+    if (rev !== seenRev) { seenRev = rev; fetchAnalytics(); }
+  });
+  es.onerror = () => {
+    document.getElementById("conn-badge").textContent = "déconnecté";
+    document.getElementById("conn-badge").className = "badge bad";
+  };
+</script>
+</body>
+</html>

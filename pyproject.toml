@@ -29,7 +29,7 @@ buttonscope = "buttonscope.__main__:cli"
 include = ["saintantoine*", "buttonscope*"]
 
 [tool.setuptools.package-data]
-saintantoine = ["web/templates/*.html"]
+saintantoine = ["web/templates/*.html", "web/static/*"]
 buttonscope = ["templates/*.html"]
 
 [tool.pytest.ini_options]

@@ -15,8 +15,14 @@ import time
 from typing import List, Optional
 
 from . import __version__
+from .analytics import create_analytics
 from .audio import AudioError, create_audio_backend
-from .config import load_config, resolve_log_file, resolve_music_folder
+from .config import (
+    load_config,
+    resolve_analytics_db,
+    resolve_log_file,
+    resolve_music_folder,
+)
 from .controller import Controller
 from .debounce import PressDetector
 from .gpio import MockGpio, RealGpio
@@ -90,8 +96,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     if webhook.enabled:
         log.info("Webhook enabled: %s", cfg.webhook_url)
 
+    analytics = create_analytics(cfg, resolve_analytics_db(cfg, mode))
+
     controller = Controller(gpio, audio, bag, webhook, cfg, mode,
-                            request_shutdown=request_shutdown)
+                            request_shutdown=request_shutdown, analytics=analytics)
 
     stop_threads = threading.Event()
     threads = []
@@ -114,7 +122,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     if cfg.web_enabled:
         from .web.server import create_app, run_web_server
 
-        app = create_app(controller, ring, lambda: request_shutdown(0), cfg, folder)
+        app = create_app(controller, ring, lambda: request_shutdown(0), cfg, folder,
+                         analytics=analytics)
         threads.append(threading.Thread(target=run_web_server, name="web",
                                         args=(app, cfg), daemon=True))
 
@@ -145,6 +154,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         gpio.close()
     except Exception as e:
         log.error("GPIO close failed: %s", e)
+    try:
+        analytics.close()
+    except Exception as e:
+        log.error("Analytics close failed: %s", e)
 
     log.info("Exit (code %d).", exit_code["code"])
     return exit_code["code"]

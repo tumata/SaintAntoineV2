@@ -34,7 +34,8 @@ def fake_clock():
 class Harness:
     """A fully mocked controller over virtual time, with real temp track files."""
 
-    def __init__(self, tmp_path, n_tracks=3, track_duration=10.0, cfg=None, seed=42):
+    def __init__(self, tmp_path, n_tracks=3, track_duration=10.0, cfg=None, seed=42,
+                 analytics=None):
         self.clock = FakeClock()
         self.music_folder = tmp_path
         self.tracks = []
@@ -57,6 +58,7 @@ class Harness:
             mode="mock",
             request_shutdown=self.shutdown_calls.append,
             clock=self.clock.clock,
+            analytics=analytics,
         )
 
     def press(self):

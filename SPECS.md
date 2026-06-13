@@ -36,7 +36,7 @@
 | # | Topic | Decision |
 |---|-------|----------|
 | D1 | **Music selection** | **Shuffle bag**: shuffle all tracks into a queue, play through the entire queue, then reshuffle. Guarantee the last track of one cycle is not the first of the next. Every track plays once before any repeats. |
-| D2 | **Web UI role** | **Always on, full dashboard** — runs on both Pi and dev machine. On the Pi it drives real hardware; the web fake-press works *alongside* the physical button. |
+| D2 | **Web UI role** | **Always on, full dashboard** — runs on both Pi and dev machine. On the Pi it drives real hardware; the web fake-press works *alongside* the physical button. The landing page (`/`) is the **Analytics** page (§11.3); the operational controls (fake-press, relays, live log, restart) move to a **Debug** page (`/debug`, §11) navigated to like Songs. |
 | D3 | **Debounce strategy** | **Hold-to-trigger** (sampled/integrating debounce) + `bounce_time` + minimum inter-press interval + rapid-fire lockout. Software complemented by a **hardware RC filter** recommendation (see §8). |
 | D4 | **Hardware** | **Reuse current wiring** as defaults, all overridable via config: button on **GPIO22** (`pull_up=True` — button to GND, pressed = LOW; **revised 2026-06-12** after a ButtonScope measurement, see §4), 3 relays on **GPIO26 / GPIO20 / GPIO21**, **active-low** (`active_high=False`). |
 | D5 | **Webhook** | **Keep, but optional + generic**: a configurable webhook URL, fire-and-forget, disabled when no URL is set. Sends `{track, timestamp}` (Airtable-compatible). |
@@ -48,6 +48,8 @@
 | D11 | **Network exposure** | Web server binds to `0.0.0.0` so it's reachable over **Tailscale**; access control delegated to Tailscale. Optional shared-token gate available in config (default off). |
 | D12 | **Single process** | **One** process, one systemd unit. The web/dashboard and the music+relay logic live in the same process (web on its own thread, as in §6). No second process, no IPC socket, no polkit rule. |
 | D13 | **Dashboard restart button** | The dashboard has a **Restart** button that restarts the **whole program**: clean shutdown (relays OFF, release audio) → process exits → `systemd Restart=always` respawns it. The dashboard is briefly offline during the restart; the **user manually refreshes the page** once the server is back. Relays re-init OFF on respawn. Same path the audio watchdog uses to escalate (§9). |
+| D14 | **Analytics** | A persistent **analytics dashboard** is the landing page (§11.3): hours-of-day play histogram, favorite-songs ranking (tracks played to natural end), and per-day play counts. Backed by a **SQLite** event store (§11.4) written from the controller. Charts rendered with **Chart.js vendored as a local static asset** (no CDN, works offline). A failure in analytics must never affect playback/relays. |
+| D15 | **UI language** | All **user-facing strings are in French** (HTML pages, button labels, and the `error`/`message` JSON the browser shows). **No localization framework** — French is hard-coded. **Internal log messages stay English** (operational, read via `journalctl` and the Debug log view). This is a standing convention for all new strings. |
 
 ---
 
@@ -262,18 +264,24 @@ AudioBackend (interface)
 - **Framework:** Flask (lightweight, ubiquitous on Pi). Single small app, minimal deps.
 - **Bind:** `0.0.0.0:<port>` (default port configurable, e.g. 8080) so it's reachable from a laptop over **Tailscale** at `http://<pi-tailscale-name>:8080`.
 - **Auth:** none by default (Tailscale provides network-level access control). Optional shared-token gate via config (D11).
-- **Features:**
-  1. **Fake-press button** → POSTs to `/press`, calls the same `controller.on_press()` as the physical button. Works alongside the physical button on the Pi.
-  2. **Relay status** — three indicators colored by state (e.g. green = ON, grey = OFF), plus current state (IDLE/PLAYING) and current track name.
-  3. **Live log view** — recent logs streamed to the page (ring buffer + Server-Sent Events, or short-poll fallback). Helps debug phantom presses and audio faults.
+- **Pages & navigation:** three pages, each with a header nav (token query string carried across, French labels):
+  - `GET /` — **Analytics** landing page (§11.3). Links to *Debug* and *Chansons*.
+  - `GET /debug` — the **operational dashboard** (formerly `/`): fake-press, relay status, live log, mode badge, restart. Links to *Accueil* (analytics) and *Chansons*.
+  - `GET /songs` — song management (§11.1). Links to *Accueil* and *Debug*.
+- **Debug page features** (moved verbatim from the old landing page, strings translated to French per D15):
+  1. **Fake-press button** (« Appuyer ») → POSTs to `/press`, calls the same `controller.on_press()` as the physical button. Works alongside the physical button on the Pi.
+  2. **Relay status** — three indicators colored by state (green = ON, grey = OFF), plus current state (IDLE/PLAYING) and current track name.
+  3. **Live log view** — recent logs streamed to the page (ring buffer + Server-Sent Events). Helps debug phantom presses and audio faults. (Log lines stay English per D15.)
   4. **Mode badge** — shows REAL vs MOCK and whether GPIO/audio are live.
-  5. **Restart button** → POSTs to `/restart`; restarts the whole program (§6.2). Page shows a "restarting — refresh in a few seconds" hint; user refreshes once the server is back.
-- **Endpoints (proposed):**
+  5. **Restart button** (« Redémarrer ») → POSTs to `/restart`; restarts the whole program (§6.2).
+- **Endpoints:**
+  - `GET /` — the Analytics page (§11.4).
+  - `GET /debug` — the operational dashboard page.
   - `POST /press` — inject a press.
   - `POST /restart` — clean-exit the process so systemd respawns it (§6.2).
   - `GET /status` — JSON: state, relays, current track, mode, watchdog/audio health.
   - `GET /events` (SSE) — log + status stream.
-  - `GET /` — the dashboard page.
+  - `GET /api/analytics` — JSON aggregates for the three charts (§11.3).
 - Web server runs on its own thread inside the single process; its failures must never take down playback/relay logic (isolated, guarded).
 
 ### 11.1 Song management page
@@ -360,6 +368,78 @@ else keeps working.
   -14.0), and `upload_max_bytes` raised to **30 MB** since the full song is uploaded
   for trimming.
 
+### 11.3 Analytics page (D14)
+
+The landing page (`/`). Renders three charts with **Chart.js** (vendored locally at
+`web/static/chart.min.js`, no CDN — works offline over Tailscale). All labels/titles are
+in French (D15). The page is read-only; a failure to load analytics shows a French error
+notice and never affects the rest of the app.
+
+**Live updates (dynamic dashboard):** the page does an initial `GET /api/analytics`, then
+subscribes to the existing SSE `/events` stream (which already emits a `status` event every
+second). The controller's `status()` carries an **`analytics_rev`** counter that the event
+store bumps on every recorded event; when the page sees the revision change it refetches
+`/api/analytics` and updates the charts in place. So the graphs refresh within ~1 s of any
+button press (physical or web) or natural song completion — without constant polling/redraws.
+
+- **Graphe 1 — Heures d'écoute** ("hours of the day songs are most played"): a 24-bar
+  histogram (hours 0–23) of **play-start** events (every accepted button press that starts
+  or switches a song — physical or web). Answers *when* during the day music plays.
+- **Graphe 2 — Chansons favorites** ("most favorite songs"): a horizontal bar ranking of
+  tracks by **completed plays** — songs that played to their natural end (`on_track_finished`)
+  — ordered most-played first, top N (default 10). Switching away from a track mid-play does
+  **not** count (it wasn't played to the end).
+- **Graphe 3 — Activité par jour** ("the day when most songs were played"): a per-calendar-day
+  bar/time-series of play-start counts, with the **peak day highlighted** and called out in
+  text (e.g. « Record : 42 lectures le 12 juin 2026 »). A button press counts as a play.
+- **`GET /api/analytics`** returns, e.g.:
+  ```json
+  {
+    "by_hour":  [{"hour": 0, "count": 3}, ...],          // 24 entries, hours 0–23
+    "top_tracks": [{"name": "song.mp3", "count": 12}, ...],
+    "by_day":   [{"day": "2026-06-12", "count": 42}, ...],
+    "peak_day": {"day": "2026-06-12", "count": 42},
+    "total_plays": 137, "total_completions": 88
+  }
+  ```
+
+### 11.4 Analytics event store (D14)
+
+A **SQLite** database (Python stdlib `sqlite3`, no new dependency) is the "simple database"
+backing the analytics. New module `saintantoine/analytics.py`.
+
+- **Schema** — one append-only table:
+  ```sql
+  CREATE TABLE IF NOT EXISTS events (
+    id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts    TEXT NOT NULL,    -- local wall-clock ISO-8601 (for hour/day grouping)
+    type  TEXT NOT NULL,    -- 'play_started' | 'play_completed'
+    track TEXT              -- basename; NULL allowed
+  );
+  CREATE INDEX IF NOT EXISTS idx_events_type_ts ON events(type, ts);
+  ```
+  Two derived buckets via `strftime('%H', ts)` (hour) and `strftime('%Y-%m-%d', ts)` (day).
+- **Wall-clock vs monotonic:** the controller's playback timing uses `time.monotonic()`,
+  which is **not** wall-clock and useless for "hour of day"/"which day". Analytics events are
+  stamped with a separate **wall-clock** source (`datetime.now()`), injectable as `now_fn`
+  for tests (independent of the controller's monotonic `clock`).
+- **Recording hooks** (in `controller.py`, both physical and web presses flow through here):
+  - `record_play_started(track)` — called from `_start_playback` right after a successful
+    `load_and_play` (the single choke point for idle-start *and* switch). Feeds graphs 1 & 3.
+  - `record_play_completed(track)` — called from `on_track_finished` (natural end only).
+    Feeds graph 2.
+- **Resilience (D14):** every DB call is wrapped so a failure is logged and swallowed —
+  analytics must never raise into playback/relay logic, mirroring the webhook's
+  fire-and-forget contract. A no-op `NullAnalytics` is the default injected object so the
+  controller and all existing tests construct unchanged.
+- **Thread-safety:** writes come from the supervisor/button threads, reads from the web
+  thread. One `sqlite3` connection opened with `check_same_thread=False`, guarded by a
+  `threading.Lock`; event volume is tiny (one row per press / per natural end).
+- **Backend selection / location:** real mode stores at `analytics_db_path`
+  (default `/home/pi/saintantoine/analytics.db`); mock mode resolves to a project-local
+  file (same swap pattern as `resolve_log_file`, so dev runs don't write Pi paths).
+  Disabled via `analytics_enabled: false` → `NullAnalytics`, page shows "analytics disabled".
+
 ---
 
 ## 12. Configuration
@@ -371,6 +451,7 @@ else keeps working.
   - Debounce: `hold_window_ms`, `sample_interval_ms`, `min_press_interval_ms`, `rapidfire_count`, `rapidfire_window_s`, `rapidfire_cooldown_s`, `gpiozero_bounce_time_s`
   - Audio: `startup_delay_s`, watchdog thresholds (`health_probe_interval_s`, `play_start_grace_s`, `max_reinit_attempts`), `on_audio_fault` policy (`idle` | `resume`)
   - Web: `web_enabled`, `web_host` (default `0.0.0.0`), `web_port`, `web_auth_token` (optional), `upload_max_bytes` (§11.2, default 30 MB), `clip_duration_s` (§11.2, default 10 s), `clip_min_s` / `clip_max_s` (§11.2, default 10 / 30 s), `loudness_target_lufs` (§11.2, default -14)
+  - Analytics (§11.4): `analytics_enabled` (default `true`), `analytics_db_path` (default `/home/pi/saintantoine/analytics.db`; mock mode swaps to a project-local file), `analytics_top_n` (default 10, favorites shown)
   - Webhook: `webhook_url` (empty = disabled), `webhook_timeout_s`
   - Logging: `log_file`, `log_level`, `log_ring_buffer_size`
 
@@ -412,6 +493,10 @@ else keeps working.
   - Audio watchdog: simulated failure triggers re-init; escalation after repeated failures triggers the clean-exit path; safe IDLE on fault.
   - Clean shutdown / restart path: `/restart` and SIGTERM both stop playback, turn relays OFF, release audio, and exit (mock backends assert relays ended OFF).
   - Webhook: disabled when no URL; payload shape; never blocks (failure tolerated).
+  - Analytics (§11.4): events recorded on play-start and natural completion but **not** on
+    mid-play switch; aggregation by hour / by day / top-tracks correct over an injected
+    wall-clock; DB errors are swallowed (playback unaffected); `NullAnalytics` is a no-op;
+    `GET /api/analytics` shape; controller hooks fire for both physical and web presses.
 - **Local verification:** run with `--mock`, open the dashboard, click fake-press, watch relay colors + logs, confirm track switching and natural-end behavior using short mock-audio durations. Click **Restart**, confirm the process exits cleanly (relays OFF) and — under systemd or the dev runner — comes back; refresh the page to reconnect.
 - **CI:** runs the mock-mode suite (no Pi, no audio device required).
 
@@ -437,10 +522,12 @@ SaintAntoineV2/
 │  ├─ gpio.py                    ← GpioBackend + RealGpio(gpiozero) + MockGpio
 │  ├─ platform.py                ← Pi detection / mode selection
 │  ├─ webhook.py                 ← optional fire-and-forget webhook
+│  ├─ analytics.py               ← SQLite event store + aggregation queries (§11.4)
 │  ├─ logging_setup.py           ← file + stdout + ring-buffer handlers
 │  └─ web/
-│     ├─ server.py               ← Flask app, /press /restart /status /events
-│     └─ templates/ static/      ← dashboard page + JS
+│     ├─ server.py               ← Flask app, /press /restart /status /events /api/analytics
+│     ├─ templates/              ← analytics.html (/), debug.html (/debug), songs.html
+│     └─ static/                 ← chart.min.js (vendored Chart.js), icons
 ├─ deploy/
 │  └─ saintantoine.service       ← systemd unit
 └─ tests/
@@ -463,6 +550,9 @@ SaintAntoineV2/
 | 4 | Audio-fault policy | **Safe-IDLE** — on watchdog recovery mid-song, relays off and wait for next press. (`on_audio_fault: idle`.) |
 | 5 | Log location & rotation | Rotating file at **`/home/pi/saintantoine/log_script.txt`** (≈5 MB × 3) **+** stdout (journald) **+** in-memory ring buffer for the dashboard. |
 | 6 | Service user | **`pi`** (already in `audio`/`gpio` groups). Override `User=` + `music_folder` if a different user is used. |
+| 8 | Analytics storage | **SQLite** (stdlib `sqlite3`, single file, no new dependency) over a JSON log — proper aggregation queries, safe concurrent reads, trivial on a Pi. See §11.4. |
+| 9 | Charting library | **Chart.js vendored locally** (`web/static/chart.min.js`, no CDN) over a CDN link (offline/Tailscale-only Pi) or hand-rolled SVG (less polished). See §11.3. |
+| 10 | UI language | **French, hard-coded, no i18n framework** for user-facing strings; logs stay English. See D15. |
 | 7 | Python version | Hardware confirmed **Raspberry Pi 4**. OS not yet confirmed; a Pi 4 most commonly runs Bookworm (Python 3.11). **Target 3.11**, keep code **compatible down to 3.9** (Bullseye). ⚠️ Still to verify when possible: `python3 --version` and `grep VERSION_CODENAME /etc/os-release`. |
 
 ---
@@ -474,3 +564,6 @@ SaintAntoineV2/
 - Per-relay independent control (the 3 relays are always switched as one group).
 - Volume control and fade in/out.
 - User accounts / full auth on the dashboard (Tailscale handles network access).
+- Analytics retention/pruning, CSV export, or date-range filtering (the event store grows
+  unbounded; at button-press volume this is negligible for years). See §11.4.
+- UI localization / multi-language support — French is hard-coded (D15).

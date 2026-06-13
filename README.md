@@ -3,8 +3,10 @@
 Push-button → 3 relays ON + a song plays → song ends → relays OFF.
 Press again mid-song to switch songs (relays stay on). Runs for real on a
 Raspberry Pi 4 and fully mocked on any machine, with an always-on web
-dashboard (fake-press, relay status, live logs, restart) reachable over
-Tailscale.
+dashboard reachable over Tailscale. The landing page shows **live statistics**
+(listening hours, favorite songs, busiest days); the operational controls
+(fake-press, relay status, live logs, restart) live on a **Debug** page.
+The interface is in **French**.
 
 Full requirements: [SPECS.md](SPECS.md).
 
@@ -21,9 +23,14 @@ cp config.example.yaml config.yaml   # optional — defaults work out of the box
 python -m saintantoine --mock
 ```
 
-Open http://localhost:8080 — click **Press button** to fake a press, watch the
-relay lamps and live logs. If `pygame` is installed locally, mock mode plays
-the MockMusics tracks audibly; otherwise playback is simulated (~10 s per track).
+Open http://localhost:8080 — the **Statistiques** landing page graphs play
+activity and updates live as songs play. Go to **Debug** and click **Appuyer**
+to fake a press, watch the relay lamps and live logs. If `pygame` is installed
+locally, mock mode plays the MockMusics tracks audibly; otherwise playback is
+simulated (~10 s per track).
+
+Play history is kept in a small SQLite database (`analytics_db_path`; mock mode
+uses `./analytics.db`), written from the controller and read by the dashboard.
 
 On the **Songs** page, uploading opens a waveform selector: pick the 10-second
 section to keep, preview it, upload — the server (ffmpeg) trims it and

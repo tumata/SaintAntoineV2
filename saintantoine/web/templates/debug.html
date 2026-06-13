@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Saint Antoine</title>
+<title>Saint Antoine — Debug</title>
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-title" content="Saint Antoine">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -26,8 +26,9 @@
   .badge.ok    { background: #166534; }
   .badge.bad   { background: #b91c1c; }
   .badge.off   { background: #4b5563; }
-  a.nav { color: #93b4f5; text-decoration: none; font-size: .9rem; margin-left: auto; }
+  a.nav { color: #93b4f5; text-decoration: none; font-size: .9rem; }
   a.nav:hover { text-decoration: underline; }
+  .spacer { margin-left: auto; }
   .card {
     background: #1c2027; border: 1px solid #2a3038; border-radius: 12px;
     padding: 1.1rem 1.25rem; margin-top: 1rem;
@@ -65,11 +66,13 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>Saint Antoine</h1>
+    <h1>Debug</h1>
     <span id="mode-badge" class="badge off">…</span>
     <span id="audio-badge" class="badge off">audio</span>
-    <span id="conn-badge" class="badge off">connecting</span>
-    <a class="nav" id="songs-link" href="/songs">Songs &rarr;</a>
+    <span id="conn-badge" class="badge off">connexion</span>
+    <span class="spacer"></span>
+    <a class="nav" id="home-link" href="/">&larr; Accueil</a>
+    <a class="nav" id="songs-link" href="/songs">Chansons &rarr;</a>
   </header>
 
   <div class="card">
@@ -79,16 +82,16 @@
         <div id="track"></div>
       </div>
       <div class="relays">
-        <div class="relay"><div class="lamp" id="relay-0"></div>Relay 1</div>
-        <div class="relay"><div class="lamp" id="relay-1"></div>Relay 2</div>
-        <div class="relay"><div class="lamp" id="relay-2"></div>Relay 3</div>
+        <div class="relay"><div class="lamp" id="relay-0"></div>Relais 1</div>
+        <div class="relay"><div class="lamp" id="relay-1"></div>Relais 2</div>
+        <div class="relay"><div class="lamp" id="relay-2"></div>Relais 3</div>
       </div>
     </div>
     <div class="buttons">
-      <button id="press-btn">&#9654;&nbsp; Press button</button>
-      <button id="restart-btn">&#8635;&nbsp; Restart</button>
+      <button id="press-btn">&#9654;&nbsp; Appuyer</button>
+      <button id="restart-btn">&#8635;&nbsp; Redémarrer</button>
     </div>
-    <div id="banner">Restarting — refresh the page in a few seconds.</div>
+    <div id="banner">Redémarrage — actualisez la page dans quelques secondes.</div>
     <div class="meta" id="meta"></div>
   </div>
 
@@ -100,6 +103,7 @@
 <script>
   const token = new URLSearchParams(location.search).get("token");
   const qs = token ? "?token=" + encodeURIComponent(token) : "";
+  document.getElementById("home-link").href = "/" + qs;
   document.getElementById("songs-link").href = "/songs" + qs;
 
   function setBadge(el, text, cls) {
@@ -116,10 +120,11 @@
     });
     setBadge(document.getElementById("mode-badge"), s.mode, s.mode === "real" ? "real" : "mock");
     setBadge(document.getElementById("audio-badge"),
-             s.audio_healthy ? "audio ok" : "audio fault",
+             s.audio_healthy ? "audio ok" : "audio défaut",
              s.audio_healthy ? "ok" : "bad");
     document.getElementById("meta").textContent =
-      s.tracks_total + " track(s), " + s.bag_remaining + " left in bag — up " + s.uptime_s + " s";
+      s.tracks_total + " piste(s), " + s.bag_remaining + " restantes — actif depuis " +
+      s.uptime_s + " s";
   }
 
   const logEl = document.getElementById("log");
@@ -133,11 +138,11 @@
 
   const es = new EventSource("/events" + qs);
   es.addEventListener("status", e => {
-    setBadge(document.getElementById("conn-badge"), "live", "ok");
+    setBadge(document.getElementById("conn-badge"), "en direct", "ok");
     applyStatus(JSON.parse(e.data));
   });
   es.addEventListener("log", e => appendLog(e.data));
-  es.onerror = () => setBadge(document.getElementById("conn-badge"), "disconnected", "bad");
+  es.onerror = () => setBadge(document.getElementById("conn-badge"), "déconnecté", "bad");
 
   document.getElementById("press-btn").addEventListener("click", () => {
     fetch("/press" + qs, { method: "POST" })
@@ -145,7 +150,7 @@
   });
 
   document.getElementById("restart-btn").addEventListener("click", () => {
-    if (!confirm("Restart the whole program? Music stops and relays turn off.")) return;
+    if (!confirm("Redémarrer tout le programme ? La musique s'arrête et les relais se coupent.")) return;
     document.getElementById("banner").style.display = "block";
     fetch("/restart" + qs, { method: "POST" }).catch(() => {});
   });

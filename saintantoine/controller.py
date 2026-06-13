@@ -14,6 +14,7 @@ import threading
 import time
 from typing import Callable, Optional
 
+from .analytics import Analytics, NullAnalytics
 from .audio import AudioBackend, AudioError
 from .config import Config
 from .gpio import GpioBackend
@@ -37,6 +38,7 @@ class Controller:
         mode: str,
         request_shutdown: Optional[Callable[[int], None]] = None,
         clock: Callable[[], float] = time.monotonic,
+        analytics: Optional[Analytics] = None,
     ):
         self.gpio = gpio
         self.audio = audio
@@ -44,6 +46,7 @@ class Controller:
         self.webhook = webhook
         self.cfg = cfg
         self.mode = mode
+        self.analytics = analytics or NullAnalytics()
         self.request_shutdown = request_shutdown or (lambda code: None)
         self.clock = clock
 
@@ -77,6 +80,7 @@ class Controller:
             if self.state != PLAYING:
                 return
             log.info("Track finished naturally: %s", _name(self.current_track))
+            self.analytics.record_play_completed(_name(self.current_track))
             self.current_track = None
             self.state = IDLE
             self.gpio.relays_off()
@@ -118,6 +122,7 @@ class Controller:
         self._went_busy = False
         log.info("Playing: %s (%d track(s) left in bag).", _name(track), self.bag.remaining())
         self.webhook.fire(_name(track))
+        self.analytics.record_play_started(_name(track))
         return True
 
     def _select_existing(self, exclude: Optional[str]) -> Optional[str]:
@@ -232,6 +237,7 @@ class Controller:
                 "tracks_total": len(self.bag.tracks),
                 "bag_remaining": self.bag.remaining(),
                 "uptime_s": round(self.clock() - self._started_at, 1),
+                "analytics_rev": self.analytics.revision(),
             }
 
 

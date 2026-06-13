@@ -52,6 +52,11 @@ clip_min_s: 10.0                      # shortest clip length selectable per uplo
 clip_max_s: 30.0                      # longest clip length selectable per upload (§11.2)
 loudness_target_lufs: -14.0           # EBU R128 loudness target for all processed songs
 
+# -------------------------------------------------------- analytics ----
+analytics_enabled: true               # record play events for the statistics dashboard (§11.4)
+analytics_db_path: /home/pi/saintantoine/analytics.db   # mock mode falls back to ./analytics.db
+analytics_top_n: 10                   # number of favorite songs shown on the dashboard
+
 # -------------------------------------------------------------- webhook ----
 webhook_url: ""                       # "" = disabled. POSTs {"track","timestamp"} on each play
 webhook_timeout_s: 5.0

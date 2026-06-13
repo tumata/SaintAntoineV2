@@ -5,17 +5,20 @@ import io
 import pytest
 
 from saintantoine import processing
+from saintantoine.analytics import SqliteAnalytics
 from saintantoine.controller import PLAYING
 from saintantoine.logging_setup import RingBufferHandler
 from saintantoine.web.server import create_app
 
 
 @pytest.fixture
-def web(harness):
+def web(tmp_path, make_harness):
+    analytics = SqliteAnalytics(tmp_path / "analytics.db")
+    harness = make_harness(analytics=analytics)
     ring = RingBufferHandler(100)
     restarts = []
     app = create_app(harness.controller, ring, lambda: restarts.append(True),
-                     harness.cfg, harness.music_folder)
+                     harness.cfg, harness.music_folder, analytics=analytics)
     app.config["TESTING"] = True
     return app.test_client(), harness, restarts, ring
 
@@ -51,11 +54,37 @@ def test_restart_invokes_callback(web):
     assert restarts == [True]
 
 
-def test_dashboard_page(web):
+def test_landing_is_analytics_page(web):
     client, _, _, _ = web
     response = client.get("/")
     assert response.status_code == 200
-    assert b"Saint Antoine" in response.data
+    assert b"Statistiques" in response.data
+    assert b"/static/chart.min.js" in response.data
+
+
+def test_debug_page(web):
+    client, _, _, _ = web
+    response = client.get("/debug")
+    assert response.status_code == 200
+    assert "Appuyer".encode() in response.data
+    assert "Redémarrer".encode() in response.data
+
+
+def test_analytics_endpoint_shape(web):
+    client, _, _, _ = web
+    data = client.get("/api/analytics").get_json()
+    assert data["enabled"] is True
+    assert len(data["by_hour"]) == 24
+    assert data["top_tracks"] == []
+    assert data["total_plays"] == 0
+
+
+def test_press_records_in_analytics(web):
+    client, _, _, _ = web
+    client.post("/press")
+    data = client.get("/api/analytics").get_json()
+    assert data["total_plays"] == 1
+    assert client.get("/status").get_json()["analytics_rev"] == 1
 
 
 def test_logs_endpoint(web):
@@ -125,7 +154,7 @@ def test_songs_page(web):
     client, _, _, _ = web
     response = client.get("/songs")
     assert response.status_code == 200
-    assert b"Upload song" in response.data
+    assert "Ajouter une chanson".encode() in response.data
 
 
 def test_list_songs(web):
