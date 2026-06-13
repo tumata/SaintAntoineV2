@@ -42,6 +42,10 @@ def create_app(
     if token:
         @app.before_request
         def _check_token():
+            # The home-screen icon is fetched by iOS without our token query, so
+            # static assets stay public (they expose nothing sensitive).
+            if request.endpoint == "static":
+                return
             supplied = request.args.get("token") or request.headers.get("X-Auth-Token")
             if supplied != token:
                 return jsonify({"error": "unauthorized"}), 401
