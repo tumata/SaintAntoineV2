@@ -119,3 +119,35 @@ def test_factory_real_mode(monkeypatch):
     assert isinstance(vol, AmixerVolume)
     assert vol.control == "Master"
     assert vol.floor == cfg.volume_min_pct
+
+
+# Real `amixer scontrols` from the deployed Pi 4: only PCM exists, no Master.
+AMIXER_SCONTROLS_PI = "Simple mixer control 'PCM',0\n"
+
+
+def test_list_controls_parses_names(monkeypatch):
+    vol = AmixerVolume("Master")
+    monkeypatch.setattr(subprocess, "run", _fake_run(AMIXER_SCONTROLS_PI))
+    assert vol.list_controls() == ["PCM"]
+
+
+def test_resolve_control_falls_back_when_missing(monkeypatch):
+    # Configured 'Master' is absent; resolve to the only available control 'PCM'.
+    vol = AmixerVolume("Master")
+    monkeypatch.setattr(subprocess, "run", _fake_run(AMIXER_SCONTROLS_PI))
+    vol.resolve_control()
+    assert vol.control == "PCM"
+
+
+def test_resolve_control_keeps_valid_name(monkeypatch):
+    vol = AmixerVolume("PCM")
+    monkeypatch.setattr(subprocess, "run", _fake_run(AMIXER_SCONTROLS_PI))
+    vol.resolve_control()
+    assert vol.control == "PCM"
+
+
+def test_resolve_control_noop_when_amixer_missing(monkeypatch):
+    vol = AmixerVolume("Master")
+    monkeypatch.setattr(subprocess, "run", _fake_run(raises=FileNotFoundError()))
+    vol.resolve_control()
+    assert vol.control == "Master"  # unchanged; get()/set() report their own errors

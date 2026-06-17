@@ -24,6 +24,8 @@ log = logging.getLogger(__name__)
 _AMIXER_TIMEOUT_S = 2.0
 # First "[NN%]" token in `amixer sget <control>` output (per-channel volume).
 _PCT_RE = re.compile(r"\[(\d{1,3})%\]")
+# Control name in `amixer scontrols`: Simple mixer control 'PCM',0
+_CONTROL_RE = re.compile(r"Simple mixer control '([^']+)'")
 
 
 def clamp(pct: int, floor: int) -> int:
@@ -103,11 +105,24 @@ class AmixerVolume(VolumeControl):
             raise VolumeError(f"amixer sset {self.control} {target}% failed")
         log.info("Volume set to %d%% (control=%r).", target, self.control)
 
-    def log_controls(self) -> None:
-        """Log available simple controls once so the right name is discoverable (§3.1)."""
+    def list_controls(self) -> list[str]:
+        """Available simple-control names from `amixer scontrols` (empty on failure)."""
         out = self._run("scontrols")
-        if out is not None:
-            log.info("ALSA simple controls available:\n%s", out.strip())
+        if out is None:
+            return []
+        return _CONTROL_RE.findall(out)
+
+    def resolve_control(self) -> None:
+        """Log available controls and, if the configured one isn't present, fall
+        back to the first available so a wrong name degrades gracefully (§3.1)."""
+        controls = self.list_controls()
+        if not controls:
+            return  # amixer unavailable; get()/set() will log their own errors
+        log.info("ALSA simple controls available: %s", ", ".join(controls))
+        if self.control not in controls:
+            log.warning("Mixer control %r not found; falling back to %r.",
+                        self.control, controls[0])
+            self.control = controls[0]
 
 
 class VolumeError(Exception):
@@ -120,7 +135,7 @@ def create_volume_control(mode: str, cfg: Config) -> VolumeControl:
     floor = cfg.volume_min_pct
     if mode == "real":
         vol = AmixerVolume(cfg.mixer_control, cfg.mixer_card, floor=floor)
-        vol.log_controls()
+        vol.resolve_control()
         return vol
     log.info("Mock mode: in-memory volume control.")
     return MockVolume(floor=floor)

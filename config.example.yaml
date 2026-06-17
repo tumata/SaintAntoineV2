@@ -53,9 +53,13 @@ clip_max_s: 30.0                      # longest clip length selectable per uploa
 loudness_target_lufs: -14.0           # EBU R128 loudness target for all processed songs
 
 # -------------------------------------------------------- volume -------
+# Pin the card explicitly — the ALSA "default card" is unstable between the boot
+# service and an interactive shell. On a Pi 4 the analog 3.5 mm jack is card 0
+# (bcm2835 Headphones), control PCM. Check with `aplay -l` + `amixer -c 0 scontrols`.
+# If mixer_control isn't found, the app falls back to the first available control.
 volume_enabled: true                  # master enable for the dashboard volume slider + endpoints
-mixer_control: Master                 # ALSA simple-control name; startup logs `amixer scontrols` (Master / PCM / Headphone)
-mixer_card: ""                        # optional ALSA card index/name; empty = default card
+mixer_control: PCM                    # ALSA simple-control name (Pi 4 analog = PCM; HDMI/USB DACs vary)
+mixer_card: "0"                       # ALSA card index/name; "" = default card (avoid — unstable at boot)
 volume_min_pct: 40                    # slider floor so a headless Pi can't be silenced (goal: play louder)
 
 # -------------------------------------------------------- analytics ----
