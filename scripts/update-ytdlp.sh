@@ -13,10 +13,14 @@ set -euo pipefail
 
 PYTHON="${PYTHON:-/usr/bin/python3}"
 
+# The [default] extra bundles yt-dlp-ejs (the JS "challenge solver" scripts
+# YouTube's n-challenge needs alongside a JS runtime like Deno) — without it,
+# extraction degrades. Keep both yt-dlp and the EJS bundle current.
+#
 # Raspbian/Debian mark the system Python "externally managed" (PEP 668); the
 # plain install then needs --break-system-packages. Try clean first, fall back.
-if ! "$PYTHON" -m pip install -U yt-dlp 2>/dev/null; then
-  "$PYTHON" -m pip install -U --break-system-packages yt-dlp
+if ! "$PYTHON" -m pip install -U "yt-dlp[default]" 2>/dev/null; then
+  "$PYTHON" -m pip install -U --break-system-packages "yt-dlp[default]"
 fi
 
 echo "$(date '+%Y-%m-%d %H:%M:%S') yt-dlp now $("$PYTHON" -m yt_dlp --version 2>/dev/null || echo '?')"

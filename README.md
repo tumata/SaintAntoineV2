@@ -87,10 +87,14 @@ field is hidden when it's absent), which YouTube breaks periodically — so keep
 current with a daily cron:
 
 ```bash
-sudo pip install --break-system-packages yt-dlp   # or: pip install .[pi]
-crontab -e                                         # as user pi, add:
+sudo pip install --break-system-packages "yt-dlp[default]"   # [default] bundles the JS challenge-solver (yt-dlp-ejs)
+crontab -e                                                   # as user pi, add:
 # 0 4 * * *  /home/pi/github/SaintAntoineV2/scripts/update-ytdlp.sh >> /home/pi/github/SaintAntoineV2/ytdlp-update.log 2>&1
 ```
+
+For robust extraction (YouTube's "n challenge"), also install a JS runtime —
+on a 64-bit OS (`uname -m` → `aarch64`): `curl -fsSL https://deno.land/install.sh | sh`
+then `sudo ln -sf ~/.deno/bin/deno /usr/local/bin/deno` so the systemd service finds it.
 
 Upgrading from V1? The old crontab-based setup and how it was retired are
 documented in [deploy/LEGACY_V1.md](deploy/LEGACY_V1.md).

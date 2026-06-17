@@ -18,7 +18,9 @@ pi = [
     "pygame>=2.0",
     # Unpinned on purpose: YouTube breaks extraction periodically and yt-dlp
     # ships fixes within days; a daily cron keeps it current (SPECS_YOUTUBE_IMPORT §8).
-    "yt-dlp",
+    # [default] bundles yt-dlp-ejs, the JS challenge-solver scripts YouTube's
+    # n-challenge needs alongside a JS runtime (Deno).
+    "yt-dlp[default]",
 ]
 dev = [
     "pytest>=7.0",
