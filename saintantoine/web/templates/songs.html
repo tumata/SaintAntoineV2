@@ -46,6 +46,14 @@
   .norm-btn:hover:not(:disabled) { background: #1d4ed8; }
   .delete-btn { background: #4b5563; font-size: .8rem; padding: .35rem .8rem; }
   .delete-btn:hover:not(:disabled) { background: #b91c1c; }
+  .song-actions { display: flex; gap: .6rem; }
+  /* On narrow screens (iPhone portrait) drop the buttons onto their own row,
+     below the song name, instead of cramming everything into one line. */
+  @media (max-width: 480px) {
+    ul#songs li { flex-wrap: wrap; row-gap: 0; }
+    .song-actions { flex: 1 1 100%; margin-top: .6rem; }
+    .song-actions button { flex: 1 1 0; }
+  }
   #empty { color: #9aa3ad; font-style: italic; }
   #notice {
     display: none; margin-top: 1rem; padding: .8rem 1rem; border-radius: 10px;
@@ -211,19 +219,21 @@
       const size = document.createElement("span");
       size.className = "song-size";
       size.textContent = fmtSize(s.size_bytes);
-      li.append(name, size);
+      const actions = document.createElement("div");
+      actions.className = "song-actions";
+      li.append(name, size, actions);
       if (ffmpegOk) {
         const norm = document.createElement("button");
         norm.className = "norm-btn";
         norm.textContent = "Normaliser";
         norm.addEventListener("click", () => normalizeSong(s.name, li, norm));
-        li.append(norm);
+        actions.append(norm);
       }
       const del = document.createElement("button");
       del.className = "delete-btn";
       del.textContent = "Supprimer";
       del.addEventListener("click", () => deleteSong(s.name, data.songs.length));
-      li.append(del);
+      actions.append(del);
       ul.appendChild(li);
     }
     document.getElementById("empty").hidden = data.songs.length > 0;

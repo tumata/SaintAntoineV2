@@ -61,6 +61,11 @@
     font: .78rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: #b7c0ca;
   }
   .meta { color: #6b7480; font-size: .78rem; margin-top: .6rem; }
+  #volume-card { display: none; }
+  #volume-card h2 { font-size: 1.05rem; margin: 0 0 .6rem; }
+  .vol-row { display: flex; align-items: center; gap: 1rem; }
+  .vol-row input[type=range] { flex: 1; accent-color: #3b82f6; height: 1.6rem; }
+  #vol-value { font-size: 1.3rem; font-weight: 800; min-width: 3.2rem; text-align: right; }
 </style>
 </head>
 <body>
@@ -93,6 +98,15 @@
     </div>
     <div id="banner">Redémarrage — actualisez la page dans quelques secondes.</div>
     <div class="meta" id="meta"></div>
+  </div>
+
+  <div class="card" id="volume-card">
+    <h2>Volume</h2>
+    <div class="vol-row">
+      <input type="range" id="vol-slider" min="40" max="100" value="40" step="1"
+             aria-label="Volume">
+      <span id="vol-value">—</span>
+    </div>
   </div>
 
   <div class="card">
@@ -153,6 +167,37 @@
     if (!confirm("Redémarrer tout le programme ? La musique s'arrête et les relais se coupent.")) return;
     document.getElementById("banner").style.display = "block";
     fetch("/restart" + qs, { method: "POST" }).catch(() => {});
+  });
+
+  // --- Volume slider (SPECS_PI_VOLUME) -------------------------------------
+  const volCard = document.getElementById("volume-card");
+  const volSlider = document.getElementById("vol-slider");
+  const volValue = document.getElementById("vol-value");
+  let volTimer = null;
+
+  function showVolume(pct) { volValue.textContent = pct + " %"; }
+
+  fetch("/api/volume" + qs).then(r => r.json()).then(d => {
+    // Hidden when disabled in config or the level can't be read (no ALSA).
+    if (d.enabled === false || d.volume === null || d.volume === undefined) return;
+    if (typeof d.min === "number") volSlider.min = d.min;
+    volSlider.value = Math.max(volSlider.min, d.volume);
+    showVolume(volSlider.value);
+    volCard.style.display = "block";
+  }).catch(() => {});
+
+  volSlider.addEventListener("input", () => showVolume(volSlider.value));
+  volSlider.addEventListener("change", () => {
+    clearTimeout(volTimer);
+    volTimer = setTimeout(() => {
+      fetch("/api/volume" + qs, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ volume: Number(volSlider.value) }),
+      }).then(r => r.json()).then(d => {
+        if (d.volume != null) { volSlider.value = d.volume; showVolume(d.volume); }
+      }).catch(() => {});
+    }, 150);
   });
 </script>
 </body>

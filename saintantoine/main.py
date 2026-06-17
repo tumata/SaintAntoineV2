@@ -29,6 +29,7 @@ from .gpio import MockGpio, RealGpio
 from .logging_setup import setup_logging
 from .platform_detect import resolve_mode
 from .selection import ShuffleBag, scan_tracks
+from .volume import create_volume_control
 from .webhook import Webhook
 
 log = logging.getLogger(__name__)
@@ -122,8 +123,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     if cfg.web_enabled:
         from .web.server import create_app, run_web_server
 
+        volume = create_volume_control(mode, cfg)
         app = create_app(controller, ring, lambda: request_shutdown(0), cfg, folder,
-                         analytics=analytics)
+                         analytics=analytics, volume=volume)
         threads.append(threading.Thread(target=run_web_server, name="web",
                                         args=(app, cfg), daemon=True))
 

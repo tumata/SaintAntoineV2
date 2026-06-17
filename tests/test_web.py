@@ -8,6 +8,7 @@ from saintantoine import processing
 from saintantoine.analytics import SqliteAnalytics
 from saintantoine.controller import PLAYING
 from saintantoine.logging_setup import RingBufferHandler
+from saintantoine.volume import MockVolume
 from saintantoine.web.server import create_app
 
 
@@ -17,14 +18,16 @@ def web(tmp_path, make_harness):
     harness = make_harness(analytics=analytics)
     ring = RingBufferHandler(100)
     restarts = []
+    volume = MockVolume(initial=60, floor=harness.cfg.volume_min_pct)
     app = create_app(harness.controller, ring, lambda: restarts.append(True),
-                     harness.cfg, harness.music_folder, analytics=analytics)
+                     harness.cfg, harness.music_folder, analytics=analytics,
+                     volume=volume)
     app.config["TESTING"] = True
-    return app.test_client(), harness, restarts, ring
+    return app.test_client(), harness, restarts, ring, volume
 
 
 def test_status(web):
-    client, harness, _, _ = web
+    client, harness, _, _, _ = web
     response = client.get("/status")
     assert response.status_code == 200
     data = response.get_json()
@@ -34,7 +37,7 @@ def test_status(web):
 
 
 def test_press_triggers_controller(web):
-    client, harness, _, _ = web
+    client, harness, _, _, _ = web
     response = client.post("/press")
     assert response.status_code == 200
     assert response.get_json()["status"]["state"] == PLAYING
@@ -43,7 +46,7 @@ def test_press_triggers_controller(web):
 
 
 def test_restart_invokes_callback(web):
-    client, _, restarts, _ = web
+    client, _, restarts, _, _ = web
     response = client.post("/restart")
     assert response.status_code == 200
     import time
@@ -55,15 +58,55 @@ def test_restart_invokes_callback(web):
 
 
 def test_landing_is_analytics_page(web):
-    client, _, _, _ = web
+    client, _, _, _, _ = web
     response = client.get("/")
     assert response.status_code == 200
     assert b"Statistiques" in response.data
     assert b"/static/chart.min.js" in response.data
 
 
+def test_get_volume(web):
+    client, _, _, _, volume = web
+    response = client.get("/api/volume")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data == {"volume": 60, "enabled": True, "min": volume.floor}
+
+
+def test_set_volume(web):
+    client, _, _, _, volume = web
+    response = client.post("/api/volume", json={"volume": 80})
+    assert response.status_code == 200
+    assert response.get_json()["volume"] == 80
+    assert volume.get() == 80
+
+
+def test_set_volume_clamps_to_floor(web):
+    # Below the floor is accepted by the API but clamped on apply (play-louder intent).
+    client, _, _, _, volume = web
+    response = client.post("/api/volume", json={"volume": 10})
+    assert response.status_code == 200
+    assert response.get_json()["volume"] == volume.floor
+    assert volume.get() == volume.floor
+
+
+def test_set_volume_rejects_out_of_range(web):
+    client, _, _, _, volume = web
+    for bad in (-5, 101, 999):
+        response = client.post("/api/volume", json={"volume": bad})
+        assert response.status_code == 400
+
+
+def test_set_volume_rejects_invalid(web):
+    client, _, _, _, _ = web
+    assert client.post("/api/volume", json={}).status_code == 400
+    assert client.post("/api/volume", json={"volume": "loud"}).status_code == 400
+    assert client.post("/api/volume", data="not json",
+                       content_type="application/json").status_code == 400
+
+
 def test_debug_page(web):
-    client, _, _, _ = web
+    client, _, _, _, _ = web
     response = client.get("/debug")
     assert response.status_code == 200
     assert "Appuyer".encode() in response.data
@@ -71,7 +114,7 @@ def test_debug_page(web):
 
 
 def test_analytics_endpoint_shape(web):
-    client, _, _, _ = web
+    client, _, _, _, _ = web
     data = client.get("/api/analytics").get_json()
     assert data["enabled"] is True
     assert len(data["by_hour"]) == 24
@@ -80,7 +123,7 @@ def test_analytics_endpoint_shape(web):
 
 
 def test_press_records_in_analytics(web):
-    client, _, _, _ = web
+    client, _, _, _, _ = web
     client.post("/press")
     data = client.get("/api/analytics").get_json()
     assert data["total_plays"] == 1
@@ -88,7 +131,7 @@ def test_press_records_in_analytics(web):
 
 
 def test_logs_endpoint(web):
-    client, _, _, ring = web
+    client, _, _, ring, _ = web
     import logging
 
     record = logging.LogRecord("test", logging.INFO, __file__, 1, "hello ring", (), None)
@@ -151,14 +194,14 @@ def _upload(client, filename, data=b"\x00\x01", start_s="3.5", duration_s=None):
 
 
 def test_songs_page(web):
-    client, _, _, _ = web
+    client, _, _, _, _ = web
     response = client.get("/songs")
     assert response.status_code == 200
     assert "Ajouter une chanson".encode() in response.data
 
 
 def test_list_songs(web):
-    client, harness, _, _ = web
+    client, harness, _, _, _ = web
     data = client.get("/api/songs").get_json()
     assert [s["name"] for s in data["songs"]] == ["song0.mp3", "song1.mp3", "song2.mp3"]
     assert all(s["size_bytes"] == 1 for s in data["songs"])
@@ -172,7 +215,7 @@ def test_list_songs(web):
 
 
 def test_upload_song(web, fake_processing):
-    client, harness, _, _ = web
+    client, harness, _, _, _ = web
     response = _upload(client, "new song.mp3", b"abc", start_s="42.5")
     assert response.status_code == 201
     assert response.get_json()["name"] == "new_song.mp3"  # secure_filename applied
@@ -187,7 +230,7 @@ def test_upload_song(web, fake_processing):
 
 
 def test_upload_requires_valid_start(web, fake_processing):
-    client, harness, _, _ = web
+    client, harness, _, _, _ = web
     assert _upload(client, "a.mp3", start_s=None).status_code == 400
     assert _upload(client, "a.mp3", start_s="abc").status_code == 400
     assert _upload(client, "a.mp3", start_s="-1").status_code == 400
@@ -197,7 +240,7 @@ def test_upload_requires_valid_start(web, fake_processing):
 
 
 def test_upload_honors_duration(web, fake_processing):
-    client, harness, _, _ = web
+    client, harness, _, _, _ = web
     mid = (harness.cfg.clip_min_s + harness.cfg.clip_max_s) / 2
     assert _upload(client, "a.mp3", duration_s=str(mid)).status_code == 201
     [(_, _, _, clip, _)] = fake_processing["clips"]
@@ -205,7 +248,7 @@ def test_upload_honors_duration(web, fake_processing):
 
 
 def test_upload_clamps_duration_to_bounds(web, fake_processing):
-    client, harness, _, _ = web
+    client, harness, _, _, _ = web
     lo, hi = harness.cfg.clip_min_s, harness.cfg.clip_max_s
     assert _upload(client, "low.mp3", duration_s=str(lo - 5)).status_code == 201
     assert _upload(client, "high.mp3", duration_s=str(hi + 99)).status_code == 201
@@ -214,7 +257,7 @@ def test_upload_clamps_duration_to_bounds(web, fake_processing):
 
 
 def test_upload_rejects_invalid_duration(web, fake_processing):
-    client, harness, _, _ = web
+    client, harness, _, _, _ = web
     assert _upload(client, "a.mp3", duration_s="abc").status_code == 400
     assert _upload(client, "a.mp3", duration_s="0").status_code == 400
     assert _upload(client, "a.mp3", duration_s="-5").status_code == 400
@@ -223,7 +266,7 @@ def test_upload_rejects_invalid_duration(web, fake_processing):
 
 
 def test_upload_503_without_ffmpeg(web, monkeypatch):
-    client, harness, _, _ = web
+    client, harness, _, _, _ = web
     monkeypatch.setattr(processing, "ffmpeg_available", lambda: False)
     response = _upload(client, "a.mp3")
     assert response.status_code == 503
@@ -232,7 +275,7 @@ def test_upload_503_without_ffmpeg(web, monkeypatch):
 
 
 def test_upload_processing_failure_cleans_up(web, monkeypatch):
-    client, harness, _, _ = web
+    client, harness, _, _, _ = web
     monkeypatch.setattr(processing, "ffmpeg_available", lambda: True)
 
     def boom(*args, **kwargs):
@@ -247,14 +290,14 @@ def test_upload_processing_failure_cleans_up(web, monkeypatch):
 
 
 def test_upload_rejects_bad_extension(web, fake_processing):
-    client, harness, _, _ = web
+    client, harness, _, _, _ = web
     assert _upload(client, "evil.txt").status_code == 400
     assert _upload(client, "noext").status_code == 400
     assert not (harness.music_folder / "evil.txt").exists()
 
 
 def test_upload_rejects_collision(web, fake_processing):
-    client, harness, _, _ = web
+    client, harness, _, _, _ = web
     response = _upload(client, "song0.mp3", b"overwritten")
     assert response.status_code == 409
     assert (harness.music_folder / "song0.mp3").read_bytes() == b"\x00"
@@ -274,7 +317,7 @@ def test_upload_rejects_oversize(make_harness, fake_processing):
 
 
 def test_normalize_song(web, fake_processing):
-    client, harness, _, _ = web
+    client, harness, _, _, _ = web
     response = client.post("/api/songs/song1.mp3/normalize")
     assert response.status_code == 200
     data = response.get_json()
@@ -286,13 +329,13 @@ def test_normalize_song(web, fake_processing):
 
 
 def test_normalize_503_without_ffmpeg(web, monkeypatch):
-    client, _, _, _ = web
+    client, _, _, _, _ = web
     monkeypatch.setattr(processing, "ffmpeg_available", lambda: False)
     assert client.post("/api/songs/song1.mp3/normalize").status_code == 503
 
 
 def test_normalize_rejects_bad_names(web, fake_processing):
-    client, harness, _, _ = web
+    client, harness, _, _, _ = web
     (harness.music_folder / "notes.txt").write_text("keep me")
     assert client.post("/api/songs/ghost.mp3/normalize").status_code == 404
     assert client.post("/api/songs/..secret.mp3/normalize").status_code == 400
@@ -301,7 +344,7 @@ def test_normalize_rejects_bad_names(web, fake_processing):
 
 
 def test_normalize_failure_keeps_file(web, monkeypatch):
-    client, harness, _, _ = web
+    client, harness, _, _, _ = web
     monkeypatch.setattr(processing, "ffmpeg_available", lambda: True)
 
     def boom(*args, **kwargs):
@@ -314,7 +357,7 @@ def test_normalize_failure_keeps_file(web, monkeypatch):
 
 
 def test_delete_song(web):
-    client, harness, _, _ = web
+    client, harness, _, _, _ = web
     response = client.delete("/api/songs/song1.mp3")
     assert response.status_code == 200
     assert not (harness.music_folder / "song1.mp3").exists()
@@ -323,12 +366,12 @@ def test_delete_song(web):
 
 
 def test_delete_missing_song(web):
-    client, _, _, _ = web
+    client, _, _, _, _ = web
     assert client.delete("/api/songs/ghost.mp3").status_code == 404
 
 
 def test_delete_rejects_traversal_and_non_audio(web):
-    client, harness, _, _ = web
+    client, harness, _, _, _ = web
     (harness.music_folder / "notes.txt").write_text("keep me")
     secret = harness.music_folder.parent / "secret.mp3"
     secret.write_bytes(b"\x00")

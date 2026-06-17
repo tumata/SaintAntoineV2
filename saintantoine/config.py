@@ -79,6 +79,14 @@ class Config:
     clip_max_s: float = 30.0
     loudness_target_lufs: float = -14.0
 
+    # Volume slider (SPECS_PI_VOLUME): system master volume via ALSA amixer.
+    # volume_min_pct floors the slider so a headless Pi can't be silenced; the
+    # goal is to play louder, never below the floor.
+    volume_enabled: bool = True
+    mixer_control: str = "Master"  # ALSA simple-control name (Master / PCM / Headphone)
+    mixer_card: str = ""           # optional ALSA card index/name; empty = default
+    volume_min_pct: int = 40
+
     # Analytics (SPECS §11.4): SQLite event store behind the analytics dashboard
     analytics_enabled: bool = True
     analytics_db_path: str = DEFAULT_PI_ANALYTICS_DB
@@ -151,6 +159,8 @@ def load_config(path: Optional[str] = None) -> Config:
     if not cfg.clip_min_s <= cfg.clip_duration_s <= cfg.clip_max_s:
         raise ValueError(f"clip_duration_s must be within [clip_min_s, clip_max_s], "
                          f"got clip_duration_s={cfg.clip_duration_s}")
+    if not 0 <= cfg.volume_min_pct <= 100:
+        raise ValueError(f"volume_min_pct must be within [0, 100], got {cfg.volume_min_pct}")
     if len(cfg.relay_pins) != 3:
         log.warning("Expected 3 relay pins, got %d: %s", len(cfg.relay_pins), cfg.relay_pins)
     return cfg

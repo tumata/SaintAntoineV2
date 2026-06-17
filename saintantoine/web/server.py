@@ -24,6 +24,7 @@ from ..analytics import Analytics, NullAnalytics
 from ..config import Config
 from ..controller import Controller
 from ..logging_setup import RingBufferHandler
+from ..volume import MockVolume, VolumeControl, VolumeError
 
 log = logging.getLogger(__name__)
 
@@ -35,8 +36,11 @@ def create_app(
     cfg: Config,
     music_folder: Path,
     analytics: Analytics | None = None,
+    volume: VolumeControl | None = None,
 ) -> Flask:
     analytics = analytics or NullAnalytics()
+    # Default keeps existing call sites / tests valid without a real ALSA backend.
+    volume = volume or MockVolume(floor=cfg.volume_min_pct)
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = cfg.upload_max_bytes
     token = cfg.web_auth_token
@@ -83,6 +87,35 @@ def create_app(
     def api_analytics():
         return jsonify({"enabled": analytics.enabled,
                         **analytics.aggregates(cfg.analytics_top_n)})
+
+    # ------------------------------------------------ volume (SPECS_PI_VOLUME)
+
+    @app.get("/api/volume")
+    def get_volume():
+        if not cfg.volume_enabled:
+            return jsonify({"volume": None, "enabled": False, "min": cfg.volume_min_pct})
+        return jsonify({"volume": volume.get(), "enabled": True, "min": cfg.volume_min_pct})
+
+    @app.post("/api/volume")
+    def set_volume():
+        if not cfg.volume_enabled:
+            return jsonify({"error": "Le contrôle du volume est désactivé."}), 403
+        data = request.get_json(silent=True) or {}
+        raw = data.get("volume")
+        try:
+            pct = int(raw)
+        except (TypeError, ValueError):
+            return jsonify({"error": "volume manquant ou invalide."}), 400
+        if not 0 <= pct <= 100:
+            return jsonify({"error": "volume doit être entre 0 et 100."}), 400
+        try:
+            volume.set(pct)
+        except VolumeError as e:
+            log.error("Volume set to %d%% failed (%s): %s", pct, request.remote_addr, e)
+            return jsonify({"error": "Contrôle du volume indisponible."}), 503
+        applied = volume.get()
+        log.info("Volume set to %d%% from web dashboard (%s).", pct, request.remote_addr)
+        return jsonify({"ok": True, "volume": applied if applied is not None else pct})
 
     # ------------------------------------------------ song management (§11.1)
 

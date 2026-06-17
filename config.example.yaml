@@ -52,6 +52,12 @@ clip_min_s: 10.0                      # shortest clip length selectable per uplo
 clip_max_s: 30.0                      # longest clip length selectable per upload (§11.2)
 loudness_target_lufs: -14.0           # EBU R128 loudness target for all processed songs
 
+# -------------------------------------------------------- volume -------
+volume_enabled: true                  # master enable for the dashboard volume slider + endpoints
+mixer_control: Master                 # ALSA simple-control name; startup logs `amixer scontrols` (Master / PCM / Headphone)
+mixer_card: ""                        # optional ALSA card index/name; empty = default card
+volume_min_pct: 40                    # slider floor so a headless Pi can't be silenced (goal: play louder)
+
 # -------------------------------------------------------- analytics ----
 analytics_enabled: true               # record play events for the statistics dashboard (§11.4)
 analytics_db_path: /home/pi/saintantoine/analytics.db   # mock mode falls back to ./analytics.db
