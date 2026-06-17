@@ -79,6 +79,19 @@ journalctl -u saintantoine -f         # live logs
 
 Dashboard over Tailscale: `http://<pi-tailscale-name>:8080`.
 
+### YouTube import (optional)
+
+The Songs page can import audio straight from a YouTube link
+([SPECS_YOUTUBE_IMPORT.md](SPECS_YOUTUBE_IMPORT.md)). It needs `yt-dlp` (the import
+field is hidden when it's absent), which YouTube breaks periodically — so keep it
+current with a daily cron:
+
+```bash
+sudo pip install --break-system-packages yt-dlp   # or: pip install .[pi]
+crontab -e                                         # as user pi, add:
+# 0 4 * * *  /home/pi/github/SaintAntoineV2/scripts/update-ytdlp.sh >> /home/pi/github/SaintAntoineV2/ytdlp-update.log 2>&1
+```
+
 Upgrading from V1? The old crontab-based setup and how it was retired are
 documented in [deploy/LEGACY_V1.md](deploy/LEGACY_V1.md).
 

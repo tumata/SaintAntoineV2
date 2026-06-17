@@ -15,11 +15,12 @@ import threading
 import time
 from pathlib import Path
 from typing import Callable
+from urllib.parse import quote
 
 from flask import Flask, Response, jsonify, render_template, request
 from werkzeug.utils import secure_filename
 
-from .. import processing
+from .. import processing, youtube
 from ..analytics import Analytics, NullAnalytics
 from ..config import Config
 from ..controller import Controller
@@ -159,6 +160,8 @@ def create_app(
             "clip_max_s": cfg.clip_max_s,
             "ffmpeg_available": processing.ffmpeg_available(),
             "free_bytes": free_bytes,
+            "youtube_enabled": cfg.youtube_enabled,
+            "youtube_available": cfg.youtube_enabled and youtube.youtube_available(),
         })
 
     @app.post("/api/songs")
@@ -220,6 +223,65 @@ def create_app(
                  name, duration_s, start_s, cfg.loudness_target_lufs,
                  size, request.remote_addr)
         return jsonify({"ok": True, "name": name, "size_bytes": size}), 201
+
+    @app.post("/api/youtube")
+    def import_youtube():
+        # Download a YouTube track's audio on the Pi and hand the MP3 bytes back
+        # to the browser, which feeds them into the existing trim UI. The trim
+        # path itself is unchanged — the clip re-uploads via POST /api/songs.
+        if not cfg.youtube_enabled:
+            return jsonify({"error": "L'import YouTube est désactivé."}), 403
+        if not youtube.youtube_available():
+            return jsonify({"error": "yt-dlp n'est pas installé sur le serveur — "
+                                     "l'import YouTube est désactivé."}), 503
+        data = request.get_json(silent=True) or {}
+        url = data.get("url")
+        if not isinstance(url, str) or not url.strip():
+            return jsonify({"error": "Lien manquant."}), 400
+        url = url.strip()
+        if not youtube.is_youtube_url(url):
+            return jsonify({"error": "Lien YouTube invalide."}), 400
+        # Single-flight: bound peak CPU/disk to one download regardless of how
+        # many tabs hit the button (§7.1).
+        if not youtube.IMPORT_LOCK.acquire(blocking=False):
+            return jsonify({"error": "Un import est déjà en cours — réessayez dans un "
+                                     "instant."}), 429
+        try:
+            # Disk-fill guard: refuse if free space can't comfortably hold the
+            # download — a full SD card is the main way this could harm the Pi.
+            need = youtube.parse_filesize(cfg.youtube_max_filesize) * 3
+            try:
+                free = shutil.disk_usage(music_folder).free
+            except OSError:
+                free = None
+            if free is not None and free < need:
+                return jsonify({"error": "Espace disque insuffisant pour l'import."}), 507
+            with tempfile.TemporaryDirectory(dir=str(music_folder)) as td:
+                try:
+                    path, title = youtube.download_audio(
+                        url, Path(td),
+                        max_duration_s=cfg.youtube_max_duration_s,
+                        max_filesize=cfg.youtube_max_filesize,
+                        timeout_s=cfg.yt_dlp_timeout_s)
+                    payload = path.read_bytes()
+                except youtube.YoutubeError as e:
+                    log.error("YouTube import of %s failed (%s): %s",
+                              url, request.remote_addr, e)
+                    return jsonify({"error": "Échec du téléchargement — réessayez ; si le "
+                                    "problème persiste, yt-dlp est peut-être à mettre à "
+                                    "jour."}), 502
+                log.info("YouTube import of %r (%d bytes) from web dashboard (%s).",
+                         title, len(payload), request.remote_addr)
+                resp = Response(payload, mimetype="audio/mpeg")
+                # HTTP headers are latin-1; percent-encode so accents/emoji in the
+                # title survive (the client decodeURIComponent's it).
+                resp.headers["X-Song-Title"] = quote(title)
+                return resp
+        except Exception:
+            log.exception("Unexpected error during YouTube import (%s).", request.remote_addr)
+            return jsonify({"error": "Erreur inattendue pendant l'import."}), 500
+        finally:
+            youtube.IMPORT_LOCK.release()
 
     @app.post("/api/songs/<name>/normalize")
     def normalize_song(name: str):

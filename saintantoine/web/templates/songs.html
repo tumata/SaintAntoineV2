@@ -108,6 +108,14 @@
   #cancel-btn:hover:not(:disabled) { background: #6b7280; }
   #confirm-btn { background: #2563eb; }
   #confirm-btn:hover:not(:disabled) { background: #1d4ed8; }
+  .yt-row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+  #yt-url {
+    flex: 1 1 16rem; min-width: 0; padding: .5rem .7rem; border-radius: 8px;
+    border: 1px solid #2a2f37; background: #14171c; color: #e6e9ee; font-size: .95rem;
+  }
+  #yt-url:focus { outline: none; border-color: #60a5fa; }
+  #yt-btn { background: #b91c1c; white-space: nowrap; }
+  #yt-btn:hover:not(:disabled) { background: #dc2626; }
 </style>
 </head>
 <body>
@@ -120,6 +128,15 @@
     <button id="upload-btn">&#8682;&nbsp; Ajouter une chanson</button>
     <input type="file" id="file-input" hidden>
   </header>
+
+  <div class="card" id="yt-import" hidden>
+    <div class="yt-row">
+      <input type="url" id="yt-url" placeholder="Collez un lien YouTube…"
+             autocomplete="off" spellcheck="false">
+      <button id="yt-btn">&#9660;&nbsp; Importer depuis YouTube</button>
+    </div>
+    <div class="meta">La piste est téléchargée puis vous la rognez comme un envoi normal.</div>
+  </div>
 
   <div id="error"></div>
   <div id="ffmpeg-warn">ffmpeg n'est pas installé sur le serveur &mdash; les envois et la
@@ -176,6 +193,7 @@
   let clipDefault = 10;  // length the selector opens at
   let clipMin = 10, clipMax = 30;
   let ffmpegOk = true;
+  let songNames = new Set();  // current library names, for YouTube-import dedupe
 
   const errorEl = document.getElementById("error");
   function showError(msg) {
@@ -209,6 +227,8 @@
     document.getElementById("ffmpeg-warn").style.display = ffmpegOk ? "none" : "block";
     document.getElementById("upload-btn").disabled = !ffmpegOk;
     document.getElementById("file-input").accept = acceptExts.join(",");
+    songNames = new Set(data.songs.map(s => s.name));
+    document.getElementById("yt-import").hidden = !data.youtube_available;
     const ul = document.getElementById("songs");
     ul.innerHTML = "";
     for (const s of data.songs) {
@@ -513,6 +533,53 @@
         for (const b of [previewBtn, cancelBtn, confirmBtn]) b.disabled = false;
       });
   });
+
+  // Avoid the 409 "existe déjà" dead-end on import: suffix a clashing title with
+  // " (2)", " (3)", … against the known library before handing it to the trimmer.
+  function dedupeName(name) {
+    if (!songNames.has(name)) return name;
+    const dot = name.lastIndexOf(".");
+    const base = dot > 0 ? name.slice(0, dot) : name;
+    const ext = dot > 0 ? name.slice(dot) : "";
+    for (let i = 2; ; i++) {
+      const cand = base + " (" + i + ")" + ext;
+      if (!songNames.has(cand)) return cand;
+    }
+  }
+
+  const ytUrl = document.getElementById("yt-url");
+  const ytBtn = document.getElementById("yt-btn");
+  function importYoutube() {
+    const url = ytUrl.value.trim();
+    if (!url) return;
+    clearError();
+    ytBtn.disabled = true;
+    ytUrl.disabled = true;
+    const orig = ytBtn.innerHTML;
+    ytBtn.textContent = "Téléchargement…";
+    fetch("/api/youtube" + qs, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    }).then(async r => {
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d.error || "Échec de l'import.");
+      }
+      const title = decodeURIComponent(r.headers.get("X-Song-Title") || "audio");
+      const blob = await r.blob();
+      const file = new File([blob], dedupeName(title + ".mp3"), { type: "audio/mpeg" });
+      ytUrl.value = "";
+      openSelector(file);
+    }).catch(e => showError(e.message))
+      .finally(() => {
+        ytBtn.disabled = false;
+        ytUrl.disabled = false;
+        ytBtn.innerHTML = orig;
+      });
+  }
+  ytBtn.addEventListener("click", importYoutube);
+  ytUrl.addEventListener("keydown", e => { if (e.key === "Enter") importYoutube(); });
 
   const fileInput = document.getElementById("file-input");
   document.getElementById("upload-btn").addEventListener("click", () => fileInput.click());

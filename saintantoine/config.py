@@ -79,6 +79,14 @@ class Config:
     clip_max_s: float = 30.0
     loudness_target_lufs: float = -14.0
 
+    # YouTube import (SPECS_YOUTUBE_IMPORT): paste a link -> yt-dlp downloads the
+    # audio on the Pi -> the existing trim UI clips it. The download is heavy and
+    # shared with the core loop, so it's capped, single-flight, and niced (§7.1).
+    youtube_enabled: bool = True
+    youtube_max_duration_s: int = 900  # reject videos longer than ~15 min
+    youtube_max_filesize: str = "50M"  # yt-dlp --max-filesize cap
+    yt_dlp_timeout_s: float = 90.0     # hard subprocess timeout per download
+
     # Volume slider (SPECS_PI_VOLUME): system master volume via ALSA amixer.
     # volume_min_pct floors the slider so a headless Pi can't be silenced; the
     # goal is to play louder, never below the floor.
@@ -161,6 +169,8 @@ def load_config(path: Optional[str] = None) -> Config:
                          f"got clip_duration_s={cfg.clip_duration_s}")
     if not 0 <= cfg.volume_min_pct <= 100:
         raise ValueError(f"volume_min_pct must be within [0, 100], got {cfg.volume_min_pct}")
+    if cfg.youtube_max_duration_s <= 0:
+        raise ValueError(f"youtube_max_duration_s must be > 0, got {cfg.youtube_max_duration_s}")
     if len(cfg.relay_pins) != 3:
         log.warning("Expected 3 relay pins, got %d: %s", len(cfg.relay_pins), cfg.relay_pins)
     return cfg

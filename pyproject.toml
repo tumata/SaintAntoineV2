@@ -16,6 +16,9 @@ dependencies = [
 pi = [
     "gpiozero>=1.6",
     "pygame>=2.0",
+    # Unpinned on purpose: YouTube breaks extraction periodically and yt-dlp
+    # ships fixes within days; a daily cron keeps it current (SPECS_YOUTUBE_IMPORT §8).
+    "yt-dlp",
 ]
 dev = [
     "pytest>=7.0",

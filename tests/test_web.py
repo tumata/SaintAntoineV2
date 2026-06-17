@@ -1,10 +1,11 @@
 """Web dashboard endpoints against a fully mocked controller."""
 
 import io
+from pathlib import Path
 
 import pytest
 
-from saintantoine import processing
+from saintantoine import processing, youtube
 from saintantoine.analytics import SqliteAnalytics
 from saintantoine.controller import PLAYING
 from saintantoine.logging_setup import RingBufferHandler
@@ -381,3 +382,93 @@ def test_delete_rejects_traversal_and_non_audio(web):
     assert client.delete("/api/songs/%2e%2e%2fsecret.mp3").status_code in (400, 404)
     assert secret.exists()
     assert (harness.music_folder / "notes.txt").exists()
+
+
+# ------------------------------------------ YouTube import (SPECS_YOUTUBE_IMPORT)
+
+
+VALID_URL = "https://youtu.be/dQw4w9WgXcQ"
+
+
+@pytest.fixture
+def fake_youtube(monkeypatch):
+    """Pretend yt-dlp is installed; write a fake MP3 instead of downloading.
+
+    Keeps tests independent of yt-dlp and the network. Returns the recorded
+    download calls so tests can assert on the args.
+    """
+    calls = []
+    monkeypatch.setattr(youtube, "youtube_available", lambda: True)
+
+    def fake_download(url, dest_dir, *, max_duration_s, max_filesize, timeout_s):
+        calls.append((url, max_duration_s, max_filesize, timeout_s))
+        path = Path(dest_dir) / "Rick Astley - Never Gonna Give You Up.mp3"
+        path.write_bytes(b"ID3fake-mp3-bytes")
+        return path, path.stem
+
+    monkeypatch.setattr(youtube, "download_audio", fake_download)
+    return calls
+
+
+def test_songs_lists_youtube_flags(web):
+    client, _, _, _, _ = web
+    data = client.get("/api/songs").get_json()
+    assert data["youtube_enabled"] is True
+    assert isinstance(data["youtube_available"], bool)
+
+
+def test_youtube_success(web, fake_youtube):
+    client, _, _, _, _ = web
+    response = client.post("/api/youtube", json={"url": VALID_URL})
+    assert response.status_code == 200
+    assert response.mimetype == "audio/mpeg"
+    assert response.data == b"ID3fake-mp3-bytes"
+    # Title round-trips percent-encoded so accents/spaces survive the header.
+    from urllib.parse import unquote
+    assert unquote(response.headers["X-Song-Title"]) == \
+        "Rick Astley - Never Gonna Give You Up"
+    # Caps from config are passed through to the downloader.
+    assert fake_youtube[0][1] == 900 and fake_youtube[0][2] == "50M"
+
+
+def test_youtube_disabled(web, fake_youtube):
+    client, harness, _, _, _ = web
+    harness.cfg.youtube_enabled = False
+    assert client.post("/api/youtube", json={"url": VALID_URL}).status_code == 403
+
+
+def test_youtube_unavailable(web, monkeypatch):
+    client, _, _, _, _ = web
+    monkeypatch.setattr(youtube, "youtube_available", lambda: False)
+    assert client.post("/api/youtube", json={"url": VALID_URL}).status_code == 503
+
+
+def test_youtube_rejects_non_youtube_url(web, fake_youtube):
+    client, _, _, _, _ = web
+    assert client.post("/api/youtube", json={"url": "https://evil.example/x"}).status_code == 400
+    assert client.post("/api/youtube", json={"url": "not a url"}).status_code == 400
+    assert client.post("/api/youtube", json={}).status_code == 400
+    # A rejected URL must never reach the downloader.
+    assert fake_youtube == []
+
+
+def test_youtube_download_failure(web, monkeypatch):
+    client, _, _, _, _ = web
+    monkeypatch.setattr(youtube, "youtube_available", lambda: True)
+
+    def boom(*a, **k):
+        raise youtube.YoutubeError("yt-dlp exited with code 1")
+
+    monkeypatch.setattr(youtube, "download_audio", boom)
+    assert client.post("/api/youtube", json={"url": VALID_URL}).status_code == 502
+
+
+def test_youtube_busy_returns_429(web, fake_youtube):
+    client, _, _, _, _ = web
+    assert youtube.IMPORT_LOCK.acquire(blocking=False)  # simulate an in-flight import
+    try:
+        assert client.post("/api/youtube", json={"url": VALID_URL}).status_code == 429
+    finally:
+        youtube.IMPORT_LOCK.release()
+    # Lock is released after a normal request, so the next import succeeds.
+    assert client.post("/api/youtube", json={"url": VALID_URL}).status_code == 200

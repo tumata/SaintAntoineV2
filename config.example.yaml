@@ -52,6 +52,15 @@ clip_min_s: 10.0                      # shortest clip length selectable per uplo
 clip_max_s: 30.0                      # longest clip length selectable per upload (§11.2)
 loudness_target_lufs: -14.0           # EBU R128 loudness target for all processed songs
 
+# -------------------------------------------------- youtube import -----
+# Paste a YouTube link in the Songs page -> yt-dlp downloads the audio on the Pi
+# -> the existing trim UI clips it (SPECS_YOUTUBE_IMPORT). Needs yt-dlp installed
+# (`pip install yt-dlp`) + a daily cron to keep it current (see scripts/update-ytdlp.sh).
+youtube_enabled: true                 # master enable for the import field + endpoint
+youtube_max_duration_s: 900           # reject videos longer than this (~15 min)
+youtube_max_filesize: "50M"           # yt-dlp --max-filesize cap on the download
+yt_dlp_timeout_s: 90.0                # hard subprocess timeout per download
+
 # -------------------------------------------------------- volume -------
 # Pin the card explicitly — the ALSA "default card" is unstable between the boot
 # service and an interactive shell. On a Pi 4 the analog 3.5 mm jack is card 0
