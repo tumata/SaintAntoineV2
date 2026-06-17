@@ -20,8 +20,8 @@ StartLimitBurst=10
 [Service]
 Type=simple
 User=pi
-WorkingDirectory=/home/pi/SaintAntoineV2
-ExecStart=/usr/bin/python3 -m saintantoine --real --config /home/pi/SaintAntoineV2/config.yaml
+WorkingDirectory=/home/pi/github/SaintAntoineV2
+ExecStart=/usr/bin/python3 -m saintantoine --real --config /home/pi/github/SaintAntoineV2/config.yaml
 Restart=always
 RestartSec=3
 

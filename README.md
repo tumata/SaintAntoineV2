@@ -58,7 +58,7 @@ needed (tests create their own temp tracks).
 
 ```bash
 # On the Pi, as user pi:
-cd /home/pi && git clone <this-repo> SaintAntoineV2 && cd SaintAntoineV2
+mkdir -p /home/pi/github && cd /home/pi/github && git clone <this-repo> SaintAntoineV2 && cd SaintAntoineV2
 sudo apt install python3-pygame python3-gpiozero python3-flask python3-yaml ffmpeg  # or pip install .[pi] (ffmpeg still via apt)
 cp config.example.yaml config.yaml    # adjust if wiring/paths differ
 
