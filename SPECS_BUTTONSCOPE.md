@@ -2,7 +2,7 @@
 
 ## Specification & Requirements Document
 
-> Status: **Draft for review** · Last updated: 2026-06-12
+> Status: **Implemented** · Last updated: 2026-06-17
 >
 > This document specifies a **standalone diagnostic tool**, independent from the main
 > Saint Antoine controller ([SPECS.md](SPECS.md)), that observes the **button input line
@@ -10,6 +10,10 @@
 > **last 10 seconds** of activity. Its purpose is to *see* what the software sees on the
 > button line — genuine presses, contact bounce, and the phantom/EMI glitches that
 > motivated the main spec's §8 debounce strategy — without attaching an oscilloscope.
+>
+> Shipped as the [buttonscope/](buttonscope/) package ([sampler.py](buttonscope/sampler.py),
+> [web.py](buttonscope/web.py), `buttonscope` console script) with
+> [tests/test_buttonscope.py](tests/test_buttonscope.py).
 
 ---
 

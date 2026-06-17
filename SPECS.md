@@ -43,7 +43,7 @@
 | D6 | **Boot** | **systemd service + configurable startup delay**, with clean restart/kill via `systemctl` (no reboot needed). |
 | D7 | **Audio formats** | Support **multiple formats** (`.mp3`, `.wav`, `.ogg`, `.flac`). |
 | D8 | **Audio output** | **System default** output device (no forced 3.5mm jack). |
-| D9 | **Volume / fade** | **No** volume control, **no** fade in/out — abrupt start/stop is fine. *(A proposed dashboard master-volume slider is specced separately in [SPECS_PI_VOLUME.md](SPECS_PI_VOLUME.md) — not yet implemented.)* |
+| D9 | **Volume / fade** | **No** fade in/out — abrupt start/stop is fine. A dashboard master-volume slider was later added (revising the original "no volume control"), specced and implemented per [SPECS_PI_VOLUME.md](SPECS_PI_VOLUME.md). |
 | D10 | **Audio watchdog** | Required — detect the audio subsystem failing on long uptimes and recover automatically (see §9). |
 | D11 | **Network exposure** | Web server binds to `0.0.0.0` so it's reachable over **Tailscale**; access control delegated to Tailscale. Optional shared-token gate available in config (default off). |
 | D12 | **Single process** | **One** process, one systemd unit. The web/dashboard and the music+relay logic live in the same process (web on its own thread, as in §6). No second process, no IPC socket, no polkit rule. |

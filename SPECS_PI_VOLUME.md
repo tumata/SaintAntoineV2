@@ -2,13 +2,19 @@
 
 ## Specification & Requirements Document
 
-> Status: **Proposal — not implemented** · Last updated: 2026-06-13
+> Status: **Implemented** · Last updated: 2026-06-17
 >
 > This document specifies a **dashboard volume slider** that tunes the Raspberry Pi's
 > **overall (system master) output volume**, as an extension to the main Saint Antoine
-> controller ([SPECS.md](SPECS.md)). It is recorded here for future implementation; **no
-> code has been written**. It revises main-spec decision **D9** ("no volume control"),
-> which currently points here.
+> controller ([SPECS.md](SPECS.md)). It revises main-spec decision **D9** ("no volume
+> control"), which points here.
+>
+> Shipped as [volume.py](saintantoine/volume.py) (`AmixerVolume`/`MockVolume`),
+> `GET`/`POST /api/volume` in [web/server.py](saintantoine/web/server.py), the slider in the
+> dashboard, config keys (§6, plus a `volume_min_pct` floor), and
+> [tests/test_volume.py](tests/test_volume.py). The §9 open decisions landed as: a
+> minimum-floor clamp (`volume_min_pct`, default 40), no cross-restart persistence (ALSA
+> persists on its own), and `PCM` on card `0` as the configured mixer control for the Pi 4.
 
 ---
 
