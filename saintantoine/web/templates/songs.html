@@ -32,8 +32,6 @@
   button:disabled { opacity: .45; cursor: default; }
   #upload-btn { background: #2563eb; }
   #upload-btn:hover:not(:disabled) { background: #1d4ed8; }
-  #restart-btn { background: #7f1d1d; }
-  #restart-btn:hover { background: #991b1b; }
   ul#songs { list-style: none; margin: 0; padding: 0; }
   ul#songs li {
     display: flex; align-items: center; gap: 1rem;
@@ -144,8 +142,7 @@
     puis redémarrez.</div>
 
   <div id="notice">
-    <span>Les changements prennent effet après redémarrage.</span>
-    <button id="restart-btn">&#8635;&nbsp; Redémarrer</button>
+    <span>Les changements s'appliquent au prochain cycle de lecture.</span>
   </div>
 
   <div class="card" id="selector" hidden>
@@ -271,7 +268,7 @@
 
   function deleteSong(name, total) {
     let msg = "Supprimer « " + name + " » ?";
-    if (total <= 1) msg += "\n\nC'est la dernière chanson — après redémarrage, les appuis seront ignorés.";
+    if (total <= 1) msg += "\n\nC'est la dernière chanson — une fois supprimée, les appuis seront ignorés.";
     if (!confirm(msg)) return;
     clearError();
     fetch("/api/songs/" + encodeURIComponent(name) + qs, { method: "DELETE" })
@@ -594,13 +591,6 @@
       return;
     }
     openSelector(file);
-  });
-
-  document.getElementById("restart-btn").addEventListener("click", () => {
-    if (!confirm("Redémarrer tout le programme ? La musique s'arrête et les relais se coupent.")) return;
-    document.getElementById("notice").firstElementChild.textContent =
-      "Redémarrage — actualisez la page dans quelques secondes.";
-    fetch("/restart" + qs, { method: "POST" }).catch(() => {});
   });
 
   refresh();

@@ -291,12 +291,16 @@ A second page for managing the music library from the browser. Navigation is a p
 **← Dashboard** link back.
 
 - **Layout:** page title with an **Upload song** button at the top right; below it a card
-  listing every playable file in the resolved music folder (name + file size), each row
+  listing every playable file in the resolved music folder (name + file size), ordered
+  newest first (by modification time, so recently added songs appear at the top), each row
   with a **Delete** button behind a `confirm()` dialog.
-- **Restart to apply (cheap approach):** the track list is scanned once at startup (§7.1),
-  so uploads/deletes take effect **only after a restart**. After the first successful
-  change, the page shows a persistent *"changes take effect after restart"* notice with a
-  **Restart** button (same `/restart` mechanism as §6.2). No live rescan.
+- **Rescan at cycle boundary:** the shuffle bag re-scans the music folder each time it
+  refills (at a cycle boundary, §7.1), so uploads/deletes take effect on the **next shuffle
+  cycle** without a restart. Deletions are also handled live by the pre-play existence
+  check (§7.3); the rescan's main job is picking up new uploads. A transient/empty scan
+  never wipes a working pool. After the first successful change, the page shows a persistent
+  *"changes apply on the next playback cycle"* notice. Users who want changes applied
+  immediately can restart from the Debug page (§6.2).
 - **Endpoints** (all behind the optional token gate of D11):
   - `GET /songs` — the page.
   - `GET /api/songs` — JSON list `{songs: [{name, size_bytes}], extensions, max_upload_bytes}`.

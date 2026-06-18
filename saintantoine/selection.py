@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import random
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import Callable, List, Optional, Sequence
 
 log = logging.getLogger(__name__)
 
@@ -31,8 +31,17 @@ def scan_tracks(folder: Path, extensions: Sequence[str]) -> List[str]:
 
 
 class ShuffleBag:
-    def __init__(self, tracks: Sequence[str], rng: Optional[random.Random] = None):
+    def __init__(
+        self,
+        tracks: Sequence[str],
+        rng: Optional[random.Random] = None,
+        track_provider: Optional[Callable[[], Sequence[str]]] = None,
+    ):
         self._rng = rng or random.Random()
+        # Re-scanned at each cycle boundary so uploads are picked up without a
+        # restart (SPECS §11.1). Deletions are already handled live by the
+        # controller's pre-play existence check.
+        self._provider = track_provider
         self._tracks: List[str] = list(dict.fromkeys(tracks))
         self._bag: List[str] = []
         self._last: Optional[str] = None
@@ -49,7 +58,29 @@ class ShuffleBag:
         self._tracks = [t for t in self._tracks if t != track]
         self._bag = [t for t in self._bag if t != track]
 
+    def _rescan(self) -> None:
+        """Refresh the track pool from the provider at a cycle boundary."""
+        scanned = list(dict.fromkeys(self._provider()))
+        if not scanned:
+            # A genuinely empty folder is rare and an OSError-driven empty scan
+            # is a transient blip; either way, don't wipe a working pool.
+            if self._tracks:
+                log.warning("Rescan found no tracks; keeping current pool of %d.",
+                            len(self._tracks))
+            return
+        if scanned == self._tracks:
+            return
+        current = set(self._tracks)
+        incoming = set(scanned)
+        added = sum(1 for t in scanned if t not in current)
+        removed = sum(1 for t in current if t not in incoming)
+        self._tracks = scanned
+        log.info("Rescanned music folder: %d added, %d removed, %d track(s) total.",
+                 added, removed, len(scanned))
+
     def _refill(self) -> None:
+        if self._provider is not None:
+            self._rescan()
         self._bag = list(self._tracks)
         self._rng.shuffle(self._bag)
         # Cycle boundary: the next pick must differ from the previous cycle's last track

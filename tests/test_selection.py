@@ -75,6 +75,44 @@ def test_duplicates_collapsed():
     assert sorted(bag.tracks) == ["/m/a.mp3", "/m/b.mp3"]
 
 
+def test_rescan_picks_up_new_tracks_on_refill():
+    # Provider returns a growing library; new tracks appear at the next cycle.
+    pool = list(TRACKS)
+    bag = ShuffleBag(pool, rng=random.Random(0), track_provider=lambda: pool)
+    first_cycle = {bag.next() for _ in range(len(TRACKS))}
+    assert first_cycle == set(TRACKS)
+    pool.append("/music/new.mp3")  # upload between cycles
+    second_cycle = {bag.next() for _ in range(len(pool))}
+    assert "/music/new.mp3" in second_cycle
+
+
+def test_rescan_drops_deleted_tracks_on_refill():
+    pool = list(TRACKS)
+    bag = ShuffleBag(pool, rng=random.Random(0), track_provider=lambda: pool)
+    [bag.next() for _ in range(len(TRACKS))]  # drain one cycle
+    pool.remove(TRACKS[2])  # deleted between cycles
+    seen = {bag.next() for _ in range(len(pool) * 3)}
+    assert TRACKS[2] not in seen
+    assert TRACKS[2] not in bag.tracks
+
+
+def test_rescan_empty_keeps_working_pool():
+    # A transient/empty scan must not wipe a working pool.
+    results = [list(TRACKS), []]
+    bag = ShuffleBag(TRACKS, rng=random.Random(0),
+                     track_provider=lambda: results.pop(0) if results else [])
+    [bag.next() for _ in range(len(TRACKS))]  # first refill consumes results[0]
+    [bag.next() for _ in range(len(TRACKS))]  # second refill sees [] -> keep pool
+    assert set(bag.tracks) == set(TRACKS)
+
+
+def test_no_provider_never_rescans():
+    bag = ShuffleBag(TRACKS, rng=random.Random(0))
+    for _ in range(len(TRACKS) * 3):
+        assert bag.next() in TRACKS
+    assert set(bag.tracks) == set(TRACKS)
+
+
 def test_scan_tracks(tmp_path):
     (tmp_path / "one.mp3").write_bytes(b"x")
     (tmp_path / "two.WAV").write_bytes(b"x")

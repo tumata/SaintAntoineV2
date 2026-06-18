@@ -82,7 +82,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     else:
         log.error("No playable tracks in %s — dashboard stays up, presses will be ignored.",
                   folder)
-    bag = ShuffleBag(tracks)
+    # Re-scan the folder at each shuffle-bag cycle boundary so uploads/deletes
+    # take effect without a restart (SPECS §11.1).
+    bag = ShuffleBag(tracks, track_provider=lambda: scan_tracks(folder, cfg.audio_extensions))
 
     # --- lifecycle --------------------------------------------------------
     shutdown_event = threading.Event()

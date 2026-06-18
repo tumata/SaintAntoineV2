@@ -1,6 +1,7 @@
 """Web dashboard endpoints against a fully mocked controller."""
 
 import io
+import os
 from pathlib import Path
 
 import pytest
@@ -203,8 +204,11 @@ def test_songs_page(web):
 
 def test_list_songs(web):
     client, harness, _, _, _ = web
+    # Newest first (by mtime): song2 added last, song0 first.
+    for i in range(3):
+        os.utime(harness.music_folder / f"song{i}.mp3", (1000 + i, 1000 + i))
     data = client.get("/api/songs").get_json()
-    assert [s["name"] for s in data["songs"]] == ["song0.mp3", "song1.mp3", "song2.mp3"]
+    assert [s["name"] for s in data["songs"]] == ["song2.mp3", "song1.mp3", "song0.mp3"]
     assert all(s["size_bytes"] == 1 for s in data["songs"])
     assert data["max_upload_bytes"] == harness.cfg.upload_max_bytes
     assert ".mp3" in data["extensions"]
@@ -359,11 +363,13 @@ def test_normalize_failure_keeps_file(web, monkeypatch):
 
 def test_delete_song(web):
     client, harness, _, _, _ = web
+    for i in range(3):
+        os.utime(harness.music_folder / f"song{i}.mp3", (1000 + i, 1000 + i))
     response = client.delete("/api/songs/song1.mp3")
     assert response.status_code == 200
     assert not (harness.music_folder / "song1.mp3").exists()
     names = [s["name"] for s in client.get("/api/songs").get_json()["songs"]]
-    assert names == ["song0.mp3", "song2.mp3"]
+    assert names == ["song2.mp3", "song0.mp3"]  # newest first
 
 
 def test_delete_missing_song(web):

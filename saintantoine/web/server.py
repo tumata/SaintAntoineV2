@@ -141,11 +141,15 @@ def create_app(
     def list_songs():
         songs = []
         try:
-            for p in sorted(music_folder.iterdir()):
+            for p in music_folder.iterdir():
                 if p.is_file() and p.suffix.lower() in extensions:
-                    songs.append({"name": p.name, "size_bytes": p.stat().st_size})
+                    st = p.stat()
+                    songs.append({"name": p.name, "size_bytes": st.st_size,
+                                  "mtime": st.st_mtime})
         except OSError as e:
             log.error("Cannot read music folder %s: %s", music_folder, e)
+        # Newest first (date added), name as a stable tie-breaker.
+        songs.sort(key=lambda s: (-s["mtime"], s["name"]))
         try:
             free_bytes = shutil.disk_usage(music_folder).free
         except OSError as e:
@@ -219,7 +223,7 @@ def create_app(
         finally:
             raw.unlink(missing_ok=True)
         log.info("Uploaded %s: %.0f s clip from %.1f s, normalized to %.1f LUFS "
-                 "(%d bytes) from web dashboard (%s) — restart to apply.",
+                 "(%d bytes) from web dashboard (%s) — live at next shuffle cycle.",
                  name, duration_s, start_s, cfg.loudness_target_lufs,
                  size, request.remote_addr)
         return jsonify({"ok": True, "name": name, "size_bytes": size}), 201
@@ -316,7 +320,7 @@ def create_app(
         except OSError as e:
             log.error("Delete of %s failed: %s", name, e)
             return jsonify({"error": "Impossible de supprimer le fichier."}), 500
-        log.info("Deleted %s from web dashboard (%s) — restart to apply.",
+        log.info("Deleted %s from web dashboard (%s) — drops out at next shuffle cycle.",
                  name, request.remote_addr)
         return jsonify({"ok": True})
 
